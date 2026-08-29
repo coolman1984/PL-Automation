@@ -1,0 +1,26 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Runtime output and local evidence
+work/
+output/
+failed_runs/
+backups/
+*.log
+
+# Source workbooks and generated packages are intentionally private/local
+*.xls
+*.xlsx
+*.xlsm
+*.xlsb
+*.zip
+vendor/wheelhouse/*.whl
+vendor/wheelhouse/wheelhouse-manifest.json
+
+# PyInstaller artifacts
+build/
+dist/
+

@@ -1,0 +1,4 @@
+pywin32>=306
+PyYAML>=6.0
+pytest>=8.0
+

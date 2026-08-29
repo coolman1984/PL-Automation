@@ -1,0 +1,24 @@
+workbook:
+  target_sheets:
+    - "VD Total"
+    - "MX Total"
+    - "DA Total"
+  total_sheet: "Total PL"
+
+run:
+  year: 2026
+  month: 8
+
+safety:
+  update_external_links: false
+  refresh_pivots: false
+  overwrite_existing_actual: false
+  keep_failed_workbook: true
+  reopen_after_save: true
+
+validation:
+  numeric_tolerance: 0.01
+  require_all_sheets: true
+  require_unique_header_match: true
+  calculation_timeout_seconds: 1800
+
