@@ -46,7 +46,7 @@ Already implemented and tested locally:
 - P&L A08 recipe, validation, reporting, and idempotency checks;
 - tool catalogue that distinguishes available and planned capabilities;
 - portable/offline build and repair scripts;
-- 81 passing tests and one Windows COM test intentionally gated.
+- 84 passing tests and two Windows COM tests intentionally gated.
 
 Do not rewrite these components without a failing test or a documented design
 reason. Generalize them behind stable interfaces.
@@ -550,6 +550,7 @@ Deliverables:
 
 - `src/engines/excel_com.py` implementing the explicit-target engine contract;
 - `src/engines/router.py` implementing probe-to-engine selection;
+- `src/transaction_state.py` providing the reusable fail-closed state journal;
 - read-only `read_range` behind the engine contract;
 - gated Windows integration coverage for a real Excel workbook;
 - no generic mutation tool unlocked until the read-only acceptance gate passes.

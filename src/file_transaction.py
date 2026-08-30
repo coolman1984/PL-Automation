@@ -115,6 +115,32 @@ def publish_validated_workbook(closed_working_path: Path, final_path: Path) -> s
     return str(final_path)
 
 
+def publish_validated_file(closed_working_path: Path, final_path: Path) -> str:
+    """Publish any validated Excel-format working copy with hash verification.
+
+    The existing XLSB-only helper remains unchanged for the P&L recipe.  This
+    generic helper is deliberately limited to Excel extensions and still
+    requires the caller to prove that the file is closed and validated.
+    """
+    allowed = {".xlsx", ".xlsm", ".xlsb", ".xltx", ".xltm", ".xls"}
+    closed_working_path = Path(closed_working_path)
+    final_path = Path(final_path)
+    if not closed_working_path.exists() or not closed_working_path.is_file():
+        raise PublicationError(f"Validated working file is missing: {closed_working_path}")
+    if closed_working_path.suffix.casefold() not in allowed:
+        raise PublicationError(f"Unsupported Excel output extension: {closed_working_path.suffix}")
+    if final_path.suffix.casefold() != closed_working_path.suffix.casefold():
+        raise PublicationError("Output extension must match the validated working file")
+    final_path = _collision_safe_path(final_path)
+    try:
+        shutil.copy2(closed_working_path, final_path)
+    except Exception as exc:
+        raise PublicationError(f"Could not publish final Excel file: {exc}") from exc
+    if sha256_file(closed_working_path) != sha256_file(final_path):
+        raise PublicationError("Published Excel file hash differs from validated working copy")
+    return str(final_path)
+
+
 def retain_failed_workbook(paths: RunPaths) -> Path | None:
     if not paths.working_path.exists():
         return None
@@ -126,4 +152,3 @@ def retain_failed_workbook(paths: RunPaths) -> Path | None:
     except Exception:
         return None
     return target
-

@@ -16,6 +16,7 @@
 | `src/fake_engine.py` | Deterministic contract-test engine | M1 |
 | `src/agent_entry.py` | Start/status/description output | M1 |
 | `src/plan_validation.py` | Deterministic pre-execution plan checks | M1 |
+| `src/transaction_state.py` | Generic fail-closed states and journal | M2 |
 | `src/engines/excel_com.py` | Explicit-target Excel COM adapter | M2 |
 | `src/engines/router.py` | Probe-to-engine decision policy | M2 |
 | `src/engines/` | COM and fast-engine adapters | planned |

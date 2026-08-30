@@ -5,6 +5,9 @@
 **Overall state:** agent onboarding and read-only foundation are implemented;
 production generic write tools are still locked
 
+**Current verification:** 84 tests passed; two Windows/Excel integration tests
+are gated until an authorized Windows machine is available.
+
 ## Completed
 
 - [x] Dependency-free Excel container/protection probe.

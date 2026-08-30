@@ -11,6 +11,7 @@ from src.errors import PublicationError
 from src.file_transaction import (
     create_run_paths,
     make_run_id,
+    publish_validated_file,
     publish_validated_workbook,
 )
 
@@ -68,3 +69,16 @@ def test_publish_refuses_missing_working_file(tmp_path):
     missing = tmp_path / "does-not-exist.xlsb"
     with pytest.raises(PublicationError):
         publish_validated_workbook(missing, tmp_path / "out.xlsb")
+
+
+def test_generic_publish_supports_xlsx_and_requires_matching_extension(tmp_path):
+    working = tmp_path / "work.xlsx"
+    working.write_bytes(b"xlsx bytes")
+    final = tmp_path / "final.xlsx"
+
+    published = publish_validated_file(working, final)
+
+    assert Path(published) == final
+    assert final.read_bytes() == b"xlsx bytes"
+    with pytest.raises(PublicationError):
+        publish_validated_file(working, tmp_path / "wrong.xlsb")
