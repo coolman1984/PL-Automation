@@ -182,6 +182,11 @@ filename collision guard, and its hash equals the validated working copy's hash.
 
 ## Development
 
+The universal Excel-agent implementation roadmap is in
+`docs/UNIVERSAL_EXCEL_AGENT_CODING_PLAN_V1.md`. Coding agents should execute it
+phase by phase and must not unlock a planned tool before its release checklist
+passes.
+
 Unit tests (no Excel required):
 
 ```bat
