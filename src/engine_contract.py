@@ -97,4 +97,16 @@ class WorkbookEngine(Protocol):
         """Change one PivotTable's source and perform a targeted refresh."""
         ...
 
+    def inspect_advanced(
+        self, tool: str, target: TargetRef | None, arguments: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Return a JSON-safe before fingerprint for one declared advanced tool."""
+        ...
+
+    def execute_advanced(
+        self, tool: str, target: TargetRef | None, arguments: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Execute one validated advanced tool and return its after fingerprint."""
+        ...
+
     def close(self, *, save: bool = False) -> None: ...

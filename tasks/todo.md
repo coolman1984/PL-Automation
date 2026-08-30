@@ -13,6 +13,8 @@
 - [x] Task 9: Release formula fill-down
 - [x] Task 10: Release controlled column insertion and formatting copy
 - [x] Task 11: Release PivotTable source update and targeted refresh
+- [x] Task 11A: Implement the remaining declared advanced Excel tool families
+- [ ] Task 11A Windows acceptance: verify all advanced tools in real Excel
 - [ ] Checkpoint C re-acceptance: rerun corrected mutation tools on Windows Excel
 - [ ] Task 12: Build SAP recipe preflight and dry-run plan
 - [ ] Task 13: Execute DB clear, SAP import, and formula fill

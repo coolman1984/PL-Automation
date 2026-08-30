@@ -6,9 +6,9 @@ from src.tool_executor import execute_tool
 def test_locked_range_request_never_reaches_the_engine():
     engine = FakeEngine({"Data": {}})
     request = ToolRequest.new(
-        "set_formula",
+        "publish_workbook",
         target=TargetRef("working-copy", sheet="Data", address="A1:B2"),
-        arguments={"formulas": [["=1", "=2"], ["=3", "=4"]]},
+        arguments={},
     )
 
     result = execute_tool(request, engine=engine)
@@ -32,4 +32,3 @@ def test_declared_write_range_request_is_dry_run_before_write():
     assert result.changed is False
     assert "Dry run" in result.warnings[0]
     assert not any(call[0] == "write_values" for call in engine.calls)
-

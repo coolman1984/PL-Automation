@@ -17,6 +17,7 @@ from .backup_bundle import create_backup_bundle
 from .file_probe import probe_excel_file
 from .tool_registry import tool_catalog
 from .file_probe import resolve_com_mode
+from .advanced_tools import execute_advanced_tool
 
 # No chunking is implemented yet (V2 plan section 8: "Add configurable
 # chunking only after measuring the real payload"). This bounds a single
@@ -377,6 +378,10 @@ def execute_tool(
             after_evidence=evidence,
             metrics=ToolMetrics(elapsed_ms=round((time.perf_counter() - started) * 1000)),
         )
+
+    advanced_result = execute_advanced_tool(normalized, engine=engine)
+    if advanced_result is not None:
+        return advanced_result
 
     target_error = _require_target(normalized)
     if target_error is not None:

@@ -13,6 +13,7 @@
 | `src/agent_contracts.py` | Universal request/result/error/plan models | M1 |
 | `src/engine_contract.py` | Engine-independent workbook interface | M1 |
 | `src/tool_executor.py` | Safe dispatch for declared tools | M1 |
+| `src/advanced_tools.py` | Bounded validation and execution wrapper for advanced declared tools | M4 |
 | `src/fake_engine.py` | Deterministic contract-test engine | M1 |
 | `src/agent_entry.py` | Start/status/description output | M1 |
 | `src/plan_validation.py` | Deterministic pre-execution plan checks | M1 |
@@ -22,10 +23,9 @@
 | `src/engines/excel_com.py` / `src/fake_engine.py` | Also implement `clear_range` (ClearContents-only, bounded) | M4 |
 | `src/tool_executor.py` | Bounded mutations with working-copy-only targets, exact shape checks, pre-read caps, formula recalculation/error gates, and fail-closed PivotTable source checks | M4 remediation |
 | `src/business_sheet_updater.py`, `src/total_pl_updater.py` | Fixed a real pywin32 kwarg bug in the production column-insert step (`Resize(ColumnSize=...)` -> `Range(col1, col2)`) found while verifying the new generic `insert_columns` tool against real Excel | M1 |
-| `src/engines/excel_com.py` | Explicit-target COM adapter; finite-range validation, table-backed pivot resolution, format-copy cleanup, and formula-error counting | M4 remediation |
+| `src/engines/excel_com.py` | Explicit-target COM adapter for ranges, formulas, formatting, structure, tables, filters, validation, notes, links, charts, names, connections, pivots, and calculation | M4 |
 | `src/engines/router.py` | Probe-to-engine decision policy | M2 |
 | `src/engines/` | COM and fast-engine adapters | planned |
-| `src/tools/` | Universal Excel operations | planned |
 | `src/recipes/` | Business-specific compositions | planned |
 | `docs/UNIVERSAL_EXCEL_AGENT_CODING_PLAN_V2.md` | Canonical implementation order, gates, and SAP refresh recipe specification | active |
 | `tasks/plan.md` | Short pointer to the canonical V2 plan and current starting task | active |

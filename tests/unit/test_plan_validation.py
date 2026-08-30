@@ -7,15 +7,15 @@ def test_plan_validation_rejects_locked_tool_before_execution():
     request = ToolRequest(
         schema_version="1.0",
         transaction_id=transaction_id,
-        tool="set_formula",
+        tool="publish_workbook",
         target=TargetRef("working-copy", sheet="Data", address="A1"),
-        arguments={"values": [[1]]},
+        arguments={},
         dry_run=True,
     )
     plan = OperationPlan(
         transaction_id,
         "set one formula",
-        steps=(PlanStep("step-1", "set_formula", "write", request),),
+        steps=(PlanStep("step-1", "publish_workbook", "write", request),),
     )
 
     errors = validate_plan(plan)

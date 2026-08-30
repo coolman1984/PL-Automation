@@ -37,8 +37,10 @@ when advanced or protected features are involved.
 
 ## Current boundary
 
-`read_range` is the accepted universal read capability. Generic mutation tools
-are implemented and callable only through the guarded coordinator, but the
-latest safety remediation still requires Windows/Excel re-acceptance before
-production use. A protected workbook requires the user to open it manually in
-authorized Excel first. Never bypass that authorization.
+The declared core tool set now covers cells, formulas, formatting, rows,
+sheets, tables, filters, validation, notes, hyperlinks, PivotTables, charts,
+names, connections, calculation, and workbook validation. Use
+`python app.py --list-tools --format json` as the source of truth for exact
+contracts. The implementation still requires Windows/Excel re-acceptance
+before production use. A protected workbook requires the user to open it
+manually in authorized Excel first. Never bypass that authorization.

@@ -1,7 +1,8 @@
 # Excel Agent Foundation + P&L August Actual Automation
 
 > **Current status — NOT PRODUCTION READY (2026-08-30).** The D1-D16 safety
-> remediation is implemented and 157 automated tests pass, but the corrected
+> remediation and universal tool surface are implemented and 166 automated
+> tests pass, but the corrected
 > mutation paths still require real Windows Excel re-acceptance. Follow
 > `docs/PROJECT_STATUS.md` before use.
 

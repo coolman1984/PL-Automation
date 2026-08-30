@@ -49,6 +49,7 @@ class FakeEngine:
     values: dict[str, dict[str, list[list[Any]]]]
     formulas: dict[str, dict[str, list[list[Any]]]] | None = None
     pivot_tables: dict[str, dict[str, Any]] | None = None
+    features: dict[str, Any] | None = None
     """Keyed by ``"Sheet!PivotName"``; each value has at least
     ``source_type`` ("database" or something else), ``source_data``, and
     ``shared_with`` (a list of other ``"Sheet!Name"`` strings)."""
@@ -57,6 +58,15 @@ class FakeEngine:
         self.values = copy.deepcopy(self.values)
         self.formulas = copy.deepcopy(self.formulas or {})
         self.pivot_tables = copy.deepcopy(self.pivot_tables or {})
+        self.features = copy.deepcopy(self.features or {})
+        for name in (
+            "formats", "tables", "filters", "validations", "comments",
+            "hyperlinks", "charts", "names", "connections",
+        ):
+            self.features.setdefault(name, {})
+        self.features.setdefault(
+            "sheets", {name: {"visibility": "visible"} for name in self.values}
+        )
         self.calls: list[tuple[str, str]] = []
 
     @property
@@ -213,6 +223,132 @@ class FakeEngine:
         self.pivot_tables[key]["source_data"] = new_source_address
         self.pivot_tables[key]["source_bounds"] = new_source_address
         self.pivot_tables[key]["refreshed"] = True
+
+    @staticmethod
+    def _advanced_key(target: TargetRef | None) -> str:
+        if target is None:
+            return ""
+        return "!".join(item for item in (target.sheet, target.address, target.object_name) if item)
+
+    def inspect_advanced(
+        self, tool: str, target: TargetRef | None, arguments: dict[str, Any]
+    ) -> dict[str, Any]:
+        key = self._advanced_key(target)
+        assert self.features is not None
+        bucket_name = {
+            "format_range": "formats", "manage_table": "tables",
+            "manage_filter": "filters", "manage_validation": "validations",
+            "manage_comment": "comments", "manage_hyperlink": "hyperlinks",
+            "manage_chart": "charts", "manage_name": "names",
+            "manage_connection": "connections",
+        }.get(tool)
+        if tool == "manage_sheet":
+            return {
+                "sheet_names": sorted(self.values),
+                "sheet": copy.deepcopy(self.features["sheets"].get(str(target.sheet))) if target else None,
+                "empty": not bool(self.values.get(str(target.sheet), {})),
+            }
+        if tool == "insert_rows":
+            return {"anchor": key, "formula_error_count": 0}
+        if bucket_name:
+            object_key = str(arguments.get("name")) if tool in {"manage_chart", "manage_name", "manage_connection"} else key
+            if tool == "manage_table" and target is not None:
+                object_key = f"{target.sheet}!{target.object_name}"
+            return {"key": object_key, "current": copy.deepcopy(self.features[bucket_name].get(object_key))}
+        if tool == "refresh_workbook":
+            return {"connections": list(arguments.get("connection_names", [])), "pivot_tables": list(arguments.get("pivot_tables", []))}
+        if tool == "calculate_workbook":
+            return {"calculated": bool(self.features.get("calculated", False))}
+        if tool == "validate_workbook":
+            expected = arguments.get("expected_sheet_names")
+            checks: dict[str, bool] = {}
+            if expected is not None:
+                checks["sheet_names"] = sorted(expected) == sorted(self.values)
+            for kind, feature in (("tables", "tables"), ("charts", "charts")):
+                required = arguments.get(f"required_{kind}", [])
+                checks[kind] = all(
+                    "!".join((str(item.get("sheet", "")), str(item.get("name", "")))) in self.features[feature]
+                    for item in required
+                )
+            checks["names"] = all(name in self.features["names"] for name in arguments.get("required_names", []))
+            if arguments.get("require_no_formula_errors", False):
+                checks["formula_errors"] = True
+            return {"passed": all(checks.values()), "checks": checks, "formula_error_count": 0}
+        raise ValueError(f"Unsupported advanced tool: {tool}")
+
+    def execute_advanced(
+        self, tool: str, target: TargetRef | None, arguments: dict[str, Any]
+    ) -> dict[str, Any]:
+        assert self.features is not None
+        self.calls.append((tool, self._advanced_key(target)))
+        if tool == "format_range":
+            self.features["formats"][self._advanced_key(target)] = copy.deepcopy(arguments["format"])
+        elif tool == "insert_rows":
+            self.features.setdefault("inserted_rows", []).append({"target": self._advanced_key(target), "count": arguments["count"]})
+        elif tool == "manage_sheet":
+            assert target is not None
+            operation = arguments["operation"]
+            name = str(target.sheet)
+            if operation == "create":
+                if name in self.values:
+                    raise ValueError(f"Sheet already exists: {name}")
+                self.values[name] = {}
+                self.formulas[name] = {}
+                self.features["sheets"][name] = {"visibility": "visible"}
+            elif operation == "rename":
+                new_name = arguments["new_name"]
+                self.values[new_name] = self.values.pop(name)
+                self.formulas[new_name] = self.formulas.pop(name, {})
+                self.features["sheets"][new_name] = self.features["sheets"].pop(name)
+            elif operation == "set_visibility":
+                self.features["sheets"][name]["visibility"] = arguments["visibility"]
+            elif operation == "delete_empty":
+                if self.values.get(name):
+                    raise ValueError("Sheet is not empty")
+                self.values.pop(name)
+                self.formulas.pop(name, None)
+                self.features["sheets"].pop(name, None)
+        elif tool in {"manage_table", "manage_filter", "manage_validation", "manage_comment", "manage_hyperlink", "manage_chart", "manage_name"}:
+            bucket = {
+                "manage_table": "tables", "manage_filter": "filters",
+                "manage_validation": "validations", "manage_comment": "comments",
+                "manage_hyperlink": "hyperlinks", "manage_chart": "charts", "manage_name": "names",
+            }[tool]
+            key = str(arguments.get("name")) if tool in {"manage_chart", "manage_name"} else self._advanced_key(target)
+            if tool == "manage_table" and target is not None:
+                key = f"{target.sheet}!{target.object_name}"
+            operation = arguments["operation"]
+            if operation in {"delete", "remove", "unlist", "clear"}:
+                self.features[bucket].pop(key, None)
+            else:
+                value = copy.deepcopy(arguments)
+                if tool == "manage_table" and target is not None:
+                    value["address"] = target.address
+                if tool == "manage_comment":
+                    value["text"] = arguments.get("text")
+                if tool == "manage_hyperlink":
+                    value["address"] = arguments.get("address")
+                if tool == "manage_name":
+                    value["refers_to"] = arguments.get("refers_to")
+                self.features[bucket][key] = value
+        elif tool == "manage_connection":
+            name = arguments["name"]
+            current = self.features["connections"].setdefault(name, {})
+            current["refreshed"] = int(current.get("refreshed", 0)) + 1
+        elif tool == "refresh_workbook":
+            for name in arguments.get("connection_names", []):
+                current = self.features["connections"].setdefault(name, {})
+                current["refreshed"] = int(current.get("refreshed", 0)) + 1
+            for item in arguments.get("pivot_tables", []):
+                key = f"{item.get('sheet')}!{item.get('name')}"
+                if key not in self.pivot_tables:
+                    raise KeyError(f"PivotTable not found: {key}")
+                self.pivot_tables[key]["refreshed"] = True
+        elif tool == "calculate_workbook":
+            self.features["calculated"] = True
+        else:
+            raise ValueError(f"Unsupported advanced mutation: {tool}")
+        return self.inspect_advanced(tool, target, arguments)
 
     def close(self, *, save: bool = False) -> None:
         self.calls.append(("close", "save" if save else "discard"))

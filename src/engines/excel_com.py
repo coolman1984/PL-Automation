@@ -9,6 +9,7 @@ initialization and lifecycle ownership.
 from __future__ import annotations
 
 import re
+import time
 from collections.abc import Sequence
 from typing import Any
 
@@ -429,6 +430,304 @@ class ExcelComEngine:
         pivot.ChangePivotCache(new_cache)
         # A targeted refresh of only this PivotTable; never Application.RefreshAll.
         pivot.RefreshTable()
+
+    @staticmethod
+    def _optional(collection: object, name: str) -> object | None:
+        try:
+            return collection(name)  # type: ignore[operator]
+        except Exception:
+            return None
+
+    @staticmethod
+    def _range_address(cell_range: object) -> str:
+        return str(cell_range.Address).replace("$", "")
+
+    def _require_write(self) -> None:
+        if self.read_only:
+            raise PermissionError("The Excel engine is read-only")
+
+    def _wait_for_calculation(self, timeout_seconds: int) -> None:
+        deadline = time.monotonic() + timeout_seconds
+        application = self.workbook.Application
+        while _safe_int(getattr(application, "CalculationState", 0)) != 0:
+            if time.monotonic() >= deadline:
+                raise TimeoutError("Excel calculation did not finish before the timeout")
+            time.sleep(0.05)
+
+    def _wait_for_connection(self, connection: object, timeout_seconds: int) -> None:
+        deadline = time.monotonic() + timeout_seconds
+        while True:
+            refreshing = False
+            for property_name in ("OLEDBConnection", "ODBCConnection"):
+                try:
+                    refreshing = refreshing or bool(getattr(getattr(connection, property_name), "Refreshing"))
+                except Exception:
+                    pass
+            if not refreshing:
+                return
+            if time.monotonic() >= deadline:
+                raise TimeoutError("Connection refresh did not finish before the timeout")
+            time.sleep(0.05)
+
+    def inspect_advanced(
+        self, tool: str, target: TargetRef | None, arguments: dict[str, Any]
+    ) -> dict[str, Any]:
+        if tool == "format_range":
+            assert target is not None
+            cell_range = self._resolve_target(target)
+            return {
+                "address": self._range_address(cell_range),
+                "format": {
+                    "font_name": cell_range.Font.Name,
+                    "font_size": cell_range.Font.Size,
+                    "bold": cell_range.Font.Bold,
+                    "italic": cell_range.Font.Italic,
+                    "font_color": cell_range.Font.Color,
+                    "fill_color": cell_range.Interior.Color,
+                    "number_format": cell_range.NumberFormat,
+                    "horizontal_alignment": cell_range.HorizontalAlignment,
+                    "vertical_alignment": cell_range.VerticalAlignment,
+                    "wrap_text": cell_range.WrapText,
+                    "row_height": cell_range.RowHeight,
+                    "column_width": cell_range.ColumnWidth,
+                },
+            }
+        if tool == "insert_rows":
+            assert target is not None
+            return {"address": target.address, "formula_error_count": self.count_formula_errors(str(target.sheet))}
+        if tool == "manage_sheet":
+            assert target is not None
+            worksheet = self._optional(self.workbook.Worksheets, str(target.sheet))
+            value = None
+            empty = None
+            if worksheet is not None:
+                used = worksheet.UsedRange
+                value = {"visibility": _safe_int(worksheet.Visible), "used_address": self._range_address(used)}
+                empty = _safe_int(used.Cells.CountLarge, _safe_int(used.Cells.Count)) == 1 and used.Value2 is None
+            return {
+                "sheet_names": [str(self.workbook.Worksheets(i).Name) for i in range(1, _safe_int(self.workbook.Worksheets.Count) + 1)],
+                "sheet": value,
+                "empty": empty,
+            }
+        if tool == "manage_table":
+            assert target is not None
+            table = self._optional(self._worksheet(str(target.sheet)).ListObjects, str(target.object_name))
+            return {"current": None if table is None else {"name": str(table.Name), "address": self._range_address(table.Range)}}
+        if tool == "manage_filter":
+            assert target is not None
+            worksheet = self._worksheet(str(target.sheet))
+            return {"current": {"auto_filter_mode": bool(worksheet.AutoFilterMode), "filter_mode": bool(worksheet.FilterMode)}}
+        if tool == "manage_validation":
+            assert target is not None
+            try:
+                validation = self._resolve_target(target).Validation
+                current = {"type": _safe_int(validation.Type), "formula1": str(validation.Formula1), "formula2": str(validation.Formula2)}
+            except Exception:
+                current = None
+            return {"current": current}
+        if tool == "manage_comment":
+            assert target is not None
+            comment = getattr(self._resolve_target(target), "Comment", None)
+            return {"current": None if comment is None else {"text": str(comment.Text())}}
+        if tool == "manage_hyperlink":
+            assert target is not None
+            links = self._resolve_target(target).Hyperlinks
+            link = links(1) if _safe_int(links.Count) else None
+            return {"current": None if link is None else {"address": str(link.Address or ""), "sub_address": str(link.SubAddress or "")}}
+        if tool == "manage_chart":
+            assert target is not None
+            chart = self._optional(self._worksheet(str(target.sheet)).ChartObjects(), str(arguments["name"]))
+            return {"current": None if chart is None else {"name": str(chart.Name), "chart_type": _safe_int(chart.Chart.ChartType)}}
+        if tool == "manage_name":
+            name = self._optional(self.workbook.Names, str(arguments["name"]))
+            return {"current": None if name is None else {"name": str(name.Name), "refers_to": str(name.RefersTo)}}
+        if tool == "manage_connection":
+            connection = self._optional(self.workbook.Connections, str(arguments["name"]))
+            return {"current": None if connection is None else {"name": str(connection.Name), "type": _safe_int(connection.Type)}}
+        if tool == "refresh_workbook":
+            return {"connections": list(arguments.get("connection_names", [])), "pivot_tables": list(arguments.get("pivot_tables", []))}
+        if tool == "calculate_workbook":
+            return {"calculation_state": _safe_int(self.workbook.Application.CalculationState)}
+        if tool == "validate_workbook":
+            sheet_names = [str(self.workbook.Worksheets(i).Name) for i in range(1, _safe_int(self.workbook.Worksheets.Count) + 1)]
+            checks: dict[str, bool] = {}
+            expected = arguments.get("expected_sheet_names")
+            if expected is not None:
+                checks["sheet_names"] = sorted(sheet_names) == sorted(expected)
+            checks["tables"] = all(
+                self._optional(self._worksheet(str(item["sheet"])).ListObjects, str(item["name"])) is not None
+                for item in arguments.get("required_tables", [])
+            )
+            checks["charts"] = all(
+                self._optional(self._worksheet(str(item["sheet"])).ChartObjects(), str(item["name"])) is not None
+                for item in arguments.get("required_charts", [])
+            )
+            checks["names"] = all(self._optional(self.workbook.Names, str(name)) is not None for name in arguments.get("required_names", []))
+            formula_error_count = 0
+            if arguments.get("require_no_formula_errors", False):
+                formula_error_count = sum(self.count_formula_errors(name) for name in sheet_names)
+                checks["formula_errors"] = formula_error_count == 0
+            return {"passed": all(checks.values()), "checks": checks, "formula_error_count": formula_error_count, "sheet_names": sheet_names}
+        raise ValueError(f"Unsupported advanced tool: {tool}")
+
+    def execute_advanced(
+        self, tool: str, target: TargetRef | None, arguments: dict[str, Any]
+    ) -> dict[str, Any]:
+        self._require_write()
+        operation = arguments.get("operation")
+        if tool == "format_range":
+            assert target is not None
+            cell_range = self._resolve_target(target)
+            patch = arguments["format"]
+            direct = {"font_name": (cell_range.Font, "Name"), "font_size": (cell_range.Font, "Size"), "bold": (cell_range.Font, "Bold"), "italic": (cell_range.Font, "Italic"), "font_color": (cell_range.Font, "Color"), "fill_color": (cell_range.Interior, "Color"), "number_format": (cell_range, "NumberFormat"), "wrap_text": (cell_range, "WrapText"), "row_height": (cell_range.EntireRow, "RowHeight"), "column_width": (cell_range.EntireColumn, "ColumnWidth")}
+            for key, (owner, property_name) in direct.items():
+                if key in patch:
+                    setattr(owner, property_name, patch[key])
+            if "horizontal_alignment" in patch:
+                cell_range.HorizontalAlignment = {"general": 1, "left": -4131, "center": -4108, "right": -4152}[patch["horizontal_alignment"]]
+            if "vertical_alignment" in patch:
+                cell_range.VerticalAlignment = {"top": -4160, "center": -4108, "bottom": -4107}[patch["vertical_alignment"]]
+        elif tool == "insert_rows":
+            assert target is not None
+            worksheet = self._worksheet(str(target.sheet))
+            first_row, _, _, _ = self.resolve_bounds(target)
+            insert_range = worksheet.Range(worksheet.Rows(first_row), worksheet.Rows(first_row + int(arguments["count"]) - 1))
+            insert_range.Insert(Shift=-4121, CopyOrigin=0)
+            worksheet.Calculate()
+        elif tool == "manage_sheet":
+            assert target is not None
+            name = str(target.sheet)
+            worksheet = self._optional(self.workbook.Worksheets, name)
+            if operation == "create":
+                if worksheet is not None:
+                    raise ValueError(f"Sheet already exists: {name}")
+                worksheet = self.workbook.Worksheets.Add(After=self.workbook.Worksheets(self.workbook.Worksheets.Count))
+                worksheet.Name = name
+            elif worksheet is None:
+                raise ValueError(f"Worksheet was not found: {name}")
+            elif operation == "rename":
+                worksheet.Name = arguments["new_name"]
+            elif operation == "set_visibility":
+                visibility = arguments["visibility"]
+                visible_count = sum(_safe_int(self.workbook.Worksheets(i).Visible) == -1 for i in range(1, _safe_int(self.workbook.Worksheets.Count) + 1))
+                if visibility != "visible" and _safe_int(worksheet.Visible) == -1 and visible_count <= 1:
+                    raise ValueError("Cannot hide the last visible worksheet")
+                worksheet.Visible = {"visible": -1, "hidden": 0, "very_hidden": 2}[visibility]
+            elif operation == "delete_empty":
+                used = worksheet.UsedRange
+                empty = _safe_int(used.Cells.CountLarge, _safe_int(used.Cells.Count)) == 1 and used.Value2 is None
+                if not empty:
+                    raise ValueError("Worksheet is not empty")
+                alerts = bool(self.workbook.Application.DisplayAlerts)
+                try:
+                    self.workbook.Application.DisplayAlerts = False
+                    worksheet.Delete()
+                finally:
+                    self.workbook.Application.DisplayAlerts = alerts
+        elif tool == "manage_table":
+            assert target is not None
+            worksheet = self._worksheet(str(target.sheet))
+            table = self._optional(worksheet.ListObjects, str(target.object_name))
+            if operation == "create":
+                if table is not None:
+                    raise ValueError(f"Table already exists: {target.object_name}")
+                table = worksheet.ListObjects.Add(1, self._resolve_target(target), None, 1 if arguments.get("has_headers", True) else 0)
+                table.Name = target.object_name
+            elif table is None:
+                raise ValueError(f"Table was not found: {target.object_name}")
+            elif operation == "resize":
+                table.Resize(self._resolve_target(target))
+            elif operation == "unlist":
+                table.Unlist()
+        elif tool == "manage_filter":
+            assert target is not None
+            worksheet = self._worksheet(str(target.sheet))
+            if operation == "apply":
+                kwargs: dict[str, Any] = {"Field": arguments["field"], "Criteria1": arguments["criteria1"]}
+                if "operator" in arguments:
+                    kwargs["Operator"] = arguments["operator"]
+                if "criteria2" in arguments:
+                    kwargs["Criteria2"] = arguments["criteria2"]
+                self._resolve_target(target).AutoFilter(**kwargs)
+            elif operation == "clear" and bool(worksheet.FilterMode):
+                worksheet.ShowAllData()
+            elif operation == "remove":
+                worksheet.AutoFilterMode = False
+        elif tool == "manage_validation":
+            assert target is not None
+            validation = self._resolve_target(target).Validation
+            if operation == "delete":
+                validation.Delete()
+            else:
+                if self.inspect_advanced(tool, target, arguments)["current"] is not None and not arguments.get("replace", False):
+                    raise ValueError("Validation exists; set replace=true to replace it")
+                try:
+                    validation.Delete()
+                except Exception:
+                    pass
+                validation.Add(Type={"whole": 1, "decimal": 2, "list": 3, "date": 4, "custom": 7}[arguments["validation_type"]], AlertStyle=1, Operator=int(arguments.get("operator", 1)), Formula1=arguments["formula1"], Formula2=arguments.get("formula2", ""))
+        elif tool in {"manage_comment", "manage_hyperlink"}:
+            assert target is not None
+            cell = self._resolve_target(target)
+            if tool == "manage_comment":
+                if getattr(cell, "Comment", None) is not None:
+                    cell.Comment.Delete()
+                if operation == "set":
+                    cell.AddComment(arguments["text"])
+            else:
+                cell.Hyperlinks.Delete()
+                if operation == "set":
+                    self._worksheet(str(target.sheet)).Hyperlinks.Add(Anchor=cell, Address=arguments.get("address", ""), SubAddress=arguments.get("sub_address", ""), TextToDisplay=arguments.get("display_text", ""))
+        elif tool == "manage_chart":
+            assert target is not None
+            worksheet = self._worksheet(str(target.sheet))
+            chart_object = self._optional(worksheet.ChartObjects(), str(arguments["name"]))
+            if operation == "delete":
+                if chart_object is None:
+                    raise ValueError(f"Chart was not found: {arguments['name']}")
+                chart_object.Delete()
+            else:
+                source = worksheet.Range(arguments["source_address"])
+                if chart_object is None:
+                    anchor = worksheet.Range(arguments.get("anchor_address") or target.address or "A1")
+                    chart_object = worksheet.ChartObjects().Add(anchor.Left, anchor.Top, float(arguments.get("width", 480)), float(arguments.get("height", 280)))
+                    chart_object.Name = arguments["name"]
+                chart_object.Chart.ChartType = {"column": 51, "bar": 57, "line": 4, "pie": 5, "area": 1, "scatter": -4169}[arguments["chart_type"]]
+                chart_object.Chart.SetSourceData(Source=source)
+                if "title" in arguments:
+                    chart_object.Chart.HasTitle = True
+                    chart_object.Chart.ChartTitle.Text = arguments["title"]
+        elif tool == "manage_name":
+            existing = self._optional(self.workbook.Names, str(arguments["name"]))
+            if existing is not None:
+                existing.Delete()
+            if operation == "set":
+                self.workbook.Names.Add(Name=arguments["name"], RefersTo=arguments["refers_to"])
+        elif tool == "manage_connection":
+            connection = self._optional(self.workbook.Connections, str(arguments["name"]))
+            if connection is None:
+                raise ValueError(f"Connection was not found: {arguments['name']}")
+            connection.Refresh()
+            self._wait_for_connection(connection, int(arguments.get("timeout_seconds", 120)))
+        elif tool == "refresh_workbook":
+            timeout = int(arguments.get("timeout_seconds", 120))
+            for name in arguments.get("connection_names", []):
+                connection = self._optional(self.workbook.Connections, str(name))
+                if connection is None:
+                    raise ValueError(f"Connection was not found: {name}")
+                connection.Refresh()
+                self._wait_for_connection(connection, timeout)
+            for item in arguments.get("pivot_tables", []):
+                self._resolve_pivot_table(str(item["sheet"]), str(item["name"])).RefreshTable()
+        elif tool == "calculate_workbook":
+            if arguments.get("full_rebuild", False):
+                self.workbook.Application.CalculateFullRebuild()
+            else:
+                self.workbook.Calculate()
+            self._wait_for_calculation(int(arguments.get("timeout_seconds", 120)))
+        else:
+            raise ValueError(f"Unsupported advanced mutation: {tool}")
+        return self.inspect_advanced(tool, target, arguments)
 
     def close(self, *, save: bool = False) -> None:
         if self.session is not None:

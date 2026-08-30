@@ -1,7 +1,7 @@
 {
-  "available_count": 13,
+  "available_count": 28,
   "schema_version": "1.0",
-  "tool_count": 24,
+  "tool_count": 30,
   "tools": [
     {
       "category": "system",
@@ -240,29 +240,113 @@
     },
     {
       "category": "cells",
-      "description": "Set one or more formulas on a working copy.",
-      "input_schema": {},
+      "description": "Set an exact rectangular formula matrix on a working copy.",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "formulas": {
+            "items": {
+              "type": "array"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "formulas"
+        ],
+        "type": "object"
+      },
       "mutates_workbook": true,
       "name": "set_formula",
-      "requires_approval": false,
+      "requires_approval": true,
       "requires_backup": true,
       "requires_excel": true,
       "risk": "low",
       "safe_for_dry_run": true,
-      "status": "planned"
+      "status": "available"
     },
     {
       "category": "formatting",
-      "description": "Apply fonts, fills, borders, alignment, and number formats.",
-      "input_schema": {},
+      "description": "Apply a whitelisted format patch to one bounded range.",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "format": {
+            "additionalProperties": false,
+            "minProperties": 1,
+            "properties": {
+              "bold": {
+                "type": "boolean"
+              },
+              "column_width": {
+                "maximum": 255,
+                "minimum": 0,
+                "type": "number"
+              },
+              "fill_color": {
+                "maximum": 16777215,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "font_color": {
+                "maximum": 16777215,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "font_name": {
+                "type": "string"
+              },
+              "font_size": {
+                "maximum": 409,
+                "minimum": 1,
+                "type": "number"
+              },
+              "horizontal_alignment": {
+                "enum": [
+                  "general",
+                  "left",
+                  "center",
+                  "right"
+                ]
+              },
+              "italic": {
+                "type": "boolean"
+              },
+              "number_format": {
+                "type": "string"
+              },
+              "row_height": {
+                "maximum": 409.5,
+                "minimum": 0,
+                "type": "number"
+              },
+              "vertical_alignment": {
+                "enum": [
+                  "top",
+                  "center",
+                  "bottom"
+                ]
+              },
+              "wrap_text": {
+                "type": "boolean"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "format"
+        ],
+        "type": "object"
+      },
       "mutates_workbook": true,
       "name": "format_range",
-      "requires_approval": false,
+      "requires_approval": true,
       "requires_backup": true,
       "requires_excel": true,
       "risk": "low",
       "safe_for_dry_run": true,
-      "status": "planned"
+      "status": "available"
     },
     {
       "category": "cells",
@@ -366,16 +450,38 @@
     },
     {
       "category": "structure",
-      "description": "Insert rows while preserving neighboring workbook behavior.",
-      "input_schema": {},
+      "description": "Insert an exact bounded row count at an exact anchor.",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "maximum": 10000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "expected_anchor_row": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "operation": {
+            "enum": [
+              "insert"
+            ]
+          }
+        },
+        "required": [
+          "operation"
+        ],
+        "type": "object"
+      },
       "mutates_workbook": true,
       "name": "insert_rows",
-      "requires_approval": false,
+      "requires_approval": true,
       "requires_backup": true,
       "requires_excel": true,
       "risk": "low",
       "safe_for_dry_run": true,
-      "status": "planned"
+      "status": "available"
     },
     {
       "category": "structure",
@@ -409,29 +515,248 @@
     },
     {
       "category": "structure",
-      "description": "Create, rename, move, hide, or safely delete sheets.",
-      "input_schema": {},
+      "description": "Create, rename, show, hide, or safely remove an empty sheet.",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_empty": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "new_name": {
+            "type": "string"
+          },
+          "operation": {
+            "enum": [
+              "create",
+              "rename",
+              "set_visibility",
+              "delete_empty"
+            ]
+          },
+          "visibility": {
+            "enum": [
+              "visible",
+              "hidden",
+              "very_hidden"
+            ]
+          }
+        },
+        "required": [
+          "operation"
+        ],
+        "type": "object"
+      },
       "mutates_workbook": true,
       "name": "manage_sheet",
-      "requires_approval": false,
+      "requires_approval": true,
       "requires_backup": true,
       "requires_excel": true,
-      "risk": "low",
+      "risk": "medium",
       "safe_for_dry_run": true,
-      "status": "planned"
+      "status": "available"
     },
     {
       "category": "objects",
-      "description": "Create, resize, or update an Excel table.",
-      "input_schema": {},
+      "description": "Create, resize, or remove a named Excel Table while preserving cell data.",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_current_address": {
+            "type": "string"
+          },
+          "has_headers": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "operation": {
+            "enum": [
+              "create",
+              "resize",
+              "unlist"
+            ]
+          }
+        },
+        "required": [
+          "operation"
+        ],
+        "type": "object"
+      },
       "mutates_workbook": true,
       "name": "manage_table",
-      "requires_approval": false,
+      "requires_approval": true,
+      "requires_backup": true,
+      "requires_excel": true,
+      "risk": "medium",
+      "safe_for_dry_run": true,
+      "status": "available"
+    },
+    {
+      "category": "objects",
+      "description": "Apply, clear, or remove an AutoFilter on one exact range.",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "criteria1": {},
+          "criteria2": {},
+          "field": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "operation": {
+            "enum": [
+              "apply",
+              "clear",
+              "remove"
+            ]
+          },
+          "operator": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "operation"
+        ],
+        "type": "object"
+      },
+      "mutates_workbook": true,
+      "name": "manage_filter",
+      "requires_approval": true,
       "requires_backup": true,
       "requires_excel": true,
       "risk": "low",
       "safe_for_dry_run": true,
-      "status": "planned"
+      "status": "available"
+    },
+    {
+      "category": "objects",
+      "description": "Set or remove data validation on one exact range.",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "formula1": {
+            "type": "string"
+          },
+          "formula2": {
+            "type": "string"
+          },
+          "operation": {
+            "enum": [
+              "set",
+              "delete"
+            ]
+          },
+          "operator": {
+            "type": "integer"
+          },
+          "replace": {
+            "type": "boolean"
+          },
+          "validation_type": {
+            "enum": [
+              "list",
+              "whole",
+              "decimal",
+              "date",
+              "custom"
+            ]
+          }
+        },
+        "required": [
+          "operation"
+        ],
+        "type": "object"
+      },
+      "mutates_workbook": true,
+      "name": "manage_validation",
+      "requires_approval": true,
+      "requires_backup": true,
+      "requires_excel": true,
+      "risk": "low",
+      "safe_for_dry_run": true,
+      "status": "available"
+    },
+    {
+      "category": "objects",
+      "description": "Set or remove a legacy cell note on one exact cell.",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_current_text": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "operation": {
+            "enum": [
+              "set",
+              "delete"
+            ]
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation"
+        ],
+        "type": "object"
+      },
+      "mutates_workbook": true,
+      "name": "manage_comment",
+      "requires_approval": true,
+      "requires_backup": true,
+      "requires_excel": true,
+      "risk": "low",
+      "safe_for_dry_run": true,
+      "status": "available"
+    },
+    {
+      "category": "objects",
+      "description": "Set or remove a safe web, mail, or internal hyperlink on one exact cell.",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "address": {
+            "type": "string"
+          },
+          "display_text": {
+            "type": "string"
+          },
+          "expected_current_address": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "operation": {
+            "enum": [
+              "set",
+              "delete"
+            ]
+          },
+          "sub_address": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation"
+        ],
+        "type": "object"
+      },
+      "mutates_workbook": true,
+      "name": "manage_hyperlink",
+      "requires_approval": true,
+      "requires_backup": true,
+      "requires_excel": true,
+      "risk": "low",
+      "safe_for_dry_run": true,
+      "status": "available"
     },
     {
       "category": "objects",
@@ -468,47 +793,237 @@
     },
     {
       "category": "objects",
-      "description": "Create or modify a chart using Excel's object model.",
-      "input_schema": {},
+      "description": "Create, update, or delete one named chart from exact ranges.",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "anchor_address": {
+            "type": "string"
+          },
+          "chart_type": {
+            "enum": [
+              "column",
+              "bar",
+              "line",
+              "pie",
+              "area",
+              "scatter"
+            ]
+          },
+          "expected_exists": {
+            "type": "boolean"
+          },
+          "height": {
+            "type": "number"
+          },
+          "name": {
+            "type": "string"
+          },
+          "operation": {
+            "enum": [
+              "create",
+              "update",
+              "delete"
+            ]
+          },
+          "source_address": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "width": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "operation"
+        ],
+        "type": "object"
+      },
       "mutates_workbook": true,
       "name": "manage_chart",
-      "requires_approval": false,
+      "requires_approval": true,
+      "requires_backup": true,
+      "requires_excel": true,
+      "risk": "medium",
+      "safe_for_dry_run": true,
+      "status": "available"
+    },
+    {
+      "category": "objects",
+      "description": "Create, update, or delete one exact workbook name with a reference fingerprint.",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_current_refers_to": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "operation": {
+            "enum": [
+              "set",
+              "delete"
+            ]
+          },
+          "refers_to": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation"
+        ],
+        "type": "object"
+      },
+      "mutates_workbook": true,
+      "name": "manage_name",
+      "requires_approval": true,
       "requires_backup": true,
       "requires_excel": true,
       "risk": "low",
       "safe_for_dry_run": true,
-      "status": "planned"
+      "status": "available"
     },
     {
       "category": "calculation",
-      "description": "Refresh approved connections in a controlled order.",
-      "input_schema": {},
+      "description": "Refresh one exact workbook connection with a bounded timeout.",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "operation": {
+            "enum": [
+              "refresh"
+            ]
+          },
+          "timeout_seconds": {
+            "maximum": 600,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "operation"
+        ],
+        "type": "object"
+      },
+      "mutates_workbook": true,
+      "name": "manage_connection",
+      "requires_approval": true,
+      "requires_backup": true,
+      "requires_excel": true,
+      "risk": "medium",
+      "safe_for_dry_run": true,
+      "status": "available"
+    },
+    {
+      "category": "calculation",
+      "description": "Refresh only explicitly named connections and PivotTables in order.",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "connection_names": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "pivot_tables": {
+            "items": {
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "timeout_seconds": {
+            "maximum": 600,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "connection_names",
+          "pivot_tables"
+        ],
+        "type": "object"
+      },
       "mutates_workbook": true,
       "name": "refresh_workbook",
-      "requires_approval": false,
+      "requires_approval": true,
       "requires_backup": true,
       "requires_excel": true,
-      "risk": "low",
+      "risk": "medium",
       "safe_for_dry_run": true,
-      "status": "planned"
+      "status": "available"
     },
     {
       "category": "calculation",
-      "description": "Calculate and wait for Excel completion with a timeout.",
-      "input_schema": {},
+      "description": "Calculate in Excel and wait for completion with a timeout.",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "full_rebuild": {
+            "type": "boolean"
+          },
+          "timeout_seconds": {
+            "maximum": 600,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
       "mutates_workbook": true,
       "name": "calculate_workbook",
-      "requires_approval": false,
+      "requires_approval": true,
       "requires_backup": true,
       "requires_excel": true,
       "risk": "low",
       "safe_for_dry_run": true,
-      "status": "planned"
+      "status": "available"
     },
     {
       "category": "safety",
-      "description": "Compare required workbook facts and formulas before publication.",
-      "input_schema": {},
+      "description": "Validate expected sheets, required objects, and formula-error health.",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_sheet_names": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "require_no_formula_errors": {
+            "type": "boolean"
+          },
+          "required_charts": {
+            "items": {
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "required_names": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "required_tables": {
+            "items": {
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
       "mutates_workbook": false,
       "name": "validate_workbook",
       "requires_approval": false,
@@ -516,7 +1031,7 @@
       "requires_excel": true,
       "risk": "low",
       "safe_for_dry_run": true,
-      "status": "planned"
+      "status": "available"
     },
     {
       "category": "safety",

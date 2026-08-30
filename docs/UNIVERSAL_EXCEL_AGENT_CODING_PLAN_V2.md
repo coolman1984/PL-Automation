@@ -403,6 +403,15 @@ sources remain locked.
 **Scope:** Medium  
 **Dependencies:** Task 8
 
+### Task 11A — Complete the declared advanced Excel surface
+
+Implemented in code: exact formula matrices, formatting, row insertion,
+sheet/table/filter/validation/note/hyperlink/chart/name operations, selected
+connection and PivotTable refresh, calculation, and workbook validation. Each
+operation uses an explicit target, bounded inputs, dry-run evidence, and
+working-copy enforcement. Fake-engine contract tests pass; the real
+Windows/Excel acceptance matrix remains required before production release.
+
 ### Checkpoint C — Core SAP dependencies
 
 Every tool in Tasks 7–11 must pass its complete release checklist: typed

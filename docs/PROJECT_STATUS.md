@@ -1,13 +1,13 @@
 # Project Status
 
 **Last updated:** 2026-08-30  
-**Milestone:** M4 safety remediation complete in code; Windows re-acceptance pending
+**Milestone:** M4 universal Excel tool set complete in code; Windows re-acceptance pending
 **Release state:** **NOT PRODUCTION READY** until the corrected mutation paths
 pass the real Windows/Excel acceptance matrix.
 
 ## Verification
 
-- 157 automated tests pass; 4 Windows/Excel integration tests are gated and
+- 166 automated tests pass; 4 Windows/Excel integration tests are gated and
   skip cleanly outside the authorized Windows environment.
 - The earlier real `read_range` acceptance remains valid: source SHA-256 was
   unchanged and no orphaned Excel process remained.
@@ -25,6 +25,11 @@ pass the real Windows/Excel acceptance matrix.
 - [x] Generic dry-run and working-copy coordinator.
 - [x] Bounded mutation implementations: clear, write, copy, formula fill,
   column insertion, and targeted PivotTable source update.
+- [x] Advanced declared tools: exact formula matrices, range formatting, row
+  insertion, sheet/table/filter/validation/comment/hyperlink/chart/name
+  management, targeted connection refresh, calculation, and validation.
+- [x] All 28 callable capabilities have machine-readable JSON contracts;
+  `publish_workbook` and `restore_backup` remain deliberately locked.
 - [x] Coordinator remediation: approved-plan digest, transaction match,
   revalidation at execution, explicit mutation intent, real-change check, and
   catch-all `FAILED_SAFE` handling.
@@ -50,6 +55,9 @@ pass the real Windows/Excel acceptance matrix.
 - [ ] Re-test PivotTables backed by both worksheet ranges and Excel Tables,
   including unresolvable and shared-cache cases.
 - [ ] Re-test format-only copy and prove `CutCopyMode` is cleared.
+- [ ] Exercise every new advanced tool against real desktop Excel, including
+  object-existence and before-fingerprint failures, calculation timeouts, and
+  targeted connection refresh (never `RefreshAll`).
 - [ ] Run two consecutive production-like transactions with unchanged source
   hashes, valid outputs, no orphaned Excel processes, and stable manifests.
 

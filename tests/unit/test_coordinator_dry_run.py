@@ -155,12 +155,12 @@ def test_plan_referencing_a_locked_tool_fails_before_approval(tmp_path):
     source = _xlsx_stub(tmp_path)
     step = PlanStep(
         step_id="step-1",
-        tool="set_formula",
+        tool="publish_workbook",
         purpose="set a formula",
         request=ToolRequest(
             schema_version="1.0",
             transaction_id="run-test-6",
-            tool="set_formula",
+            tool="publish_workbook",
             arguments={},
             dry_run=True,
         ),
