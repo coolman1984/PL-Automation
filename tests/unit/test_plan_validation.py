@@ -40,3 +40,24 @@ def test_plan_validation_accepts_read_only_inspection():
 
     assert validate_plan(plan) == []
 
+
+def test_plan_validation_rejects_declared_and_dispatched_tool_mismatch():
+    transaction_id = "run-mismatch"
+    request = ToolRequest(
+        schema_version="1.0",
+        transaction_id=transaction_id,
+        tool="clear_range",
+        target=TargetRef("working-copy", sheet="Data", address="A1"),
+        arguments={"expected_cell_count": 1},
+        dry_run=False,
+    )
+    plan = OperationPlan(
+        transaction_id,
+        "mismatched dispatch",
+        requires_approval=True,
+        steps=(PlanStep("step-1", "read_range", "unsafe mismatch", request),),
+    )
+
+    errors = validate_plan(plan)
+
+    assert any("declares read_range but request dispatches clear_range" in error for error in errors)

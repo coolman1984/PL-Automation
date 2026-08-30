@@ -2,7 +2,8 @@
 
 **Status:** Approved implementation roadmap  
 **Date:** 2026-08-30  
-**Current milestone:** Close M2, then build the generic mutation transaction  
+**Current milestone:** D1-D16 code remediation complete; re-earn Checkpoints B
+and C on real Windows Excel before Task 12
 **Primary platform:** Windows 10/11 with desktop Microsoft Excel  
 **Primary fidelity engine:** Microsoft Excel COM  
 **Priority:** Safety, fidelity, correctness, performance
@@ -516,4 +517,3 @@ authorized disposable workbook and prove:
 - unrelated workbook content and advanced Excel objects are preserved;
 - success is published only after close/reopen validation;
 - every failure produces useful evidence and no published partial output.
-

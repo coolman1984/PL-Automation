@@ -14,7 +14,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Sequence
+from typing import TYPE_CHECKING, Any, Sequence
+
+if TYPE_CHECKING:
+    from .excel_session import ExcelSession
 
 from .block_locator import (
     detect_existing_actual,
@@ -38,7 +41,6 @@ from .errors import (
     WorkbookFormatError,
     WorkbookNotFoundError,
 )
-from .excel_session import ExcelSession
 from .file_transaction import (
     assert_source_candidate,
     assert_source_unchanged,
@@ -139,6 +141,7 @@ def _safe_close(session: ExcelSession | None) -> None:
 
 
 def _connect_source(source_path: Path, mode: str) -> ExcelSession:
+    from .excel_session import ExcelSession
     if mode == "attach":
         return ExcelSession.attach(source_path)
     if mode == "open":
@@ -619,6 +622,7 @@ def _fail_closed(
 
 def run_execute(source_path: Path, config: AppConfig, mode: str, project_root: Path) -> int:
     """Full guarded transaction. Returns a process exit code."""
+    from .excel_session import ExcelSession
     manifest = RunManifest(
         run_id="pending",
         status="RUNNING",

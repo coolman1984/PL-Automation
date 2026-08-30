@@ -65,14 +65,17 @@ def assert_source_candidate(path: Path) -> None:
 
 
 def save_working_copy(source_workbook: object, working_path: Path) -> None:
+    allowed = {".xlsx", ".xlsm", ".xlsb", ".xltx", ".xltm", ".xls"}
+    if working_path.suffix.casefold() not in allowed:
+        raise WorkbookFormatError(
+            f"Working copy is not a supported Excel format: {working_path}"
+        )
     try:
         source_workbook.SaveCopyAs(str(working_path))
     except Exception as exc:  # pragma: no cover - requires Excel
         raise CopyCreationError(f"Excel SaveCopyAs failed for {working_path}: {exc}") from exc
     if not working_path.exists() or working_path.stat().st_size == 0:
         raise CopyCreationError(f"Excel did not create a usable working copy: {working_path}")
-    if working_path.suffix.casefold() != XLSB_EXTENSION:
-        raise WorkbookFormatError(f"Working copy is not .xlsb: {working_path}")
 
 
 def assert_source_unchanged(before: WorkbookFingerprint, source_path: Path) -> None:

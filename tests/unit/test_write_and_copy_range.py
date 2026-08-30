@@ -73,6 +73,47 @@ def test_write_range_rejects_a_payload_over_the_cell_limit(monkeypatch):
     assert not any(call[0] == "write_values" for call in engine.calls)
 
 
+def test_write_range_rejects_payload_shape_that_does_not_match_target():
+    engine = FakeEngine({"Data": {}})
+    request = ToolRequest.new(
+        "write_range",
+        target=TargetRef("working-copy", sheet="Data", address="A1:E10"),
+        arguments={"values": [["TOTAL"]]},
+        dry_run=False,
+    )
+
+    result = execute_tool(request, engine=engine)
+
+    assert result.ok is False
+    assert result.error.code == "shape_mismatch"
+    assert not any(call[0] == "write_values" for call in engine.calls)
+
+
+def test_write_and_copy_refuse_source_workbook_targets():
+    engine = FakeEngine({"Data": {"1,1": "old"}})
+    write = execute_tool(
+        ToolRequest.new(
+            "write_range",
+            target=TargetRef("source", sheet="Data", address="A1"),
+            arguments={"values": [["new"]]},
+            dry_run=False,
+        ),
+        engine=engine,
+    )
+    copy = execute_tool(
+        ToolRequest.new(
+            "copy_range",
+            target=TargetRef("working-copy", sheet="Data", address="A2"),
+            arguments={"source": {"workbook_id": "source", "sheet": "Data", "address": "A1"}},
+            dry_run=False,
+        ),
+        engine=engine,
+    )
+
+    assert write.error.code == "invalid_target_workbook"
+    assert copy.error.code == "cross_workbook_copy_unsupported"
+
+
 def test_copy_range_requires_matching_shape():
     engine = FakeEngine({"Data": {"1,1": "a", "1,2": "b"}})
     request = ToolRequest.new(

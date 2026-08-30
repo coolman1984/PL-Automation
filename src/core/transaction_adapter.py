@@ -15,14 +15,14 @@ from typing import Any
 
 from ..engines.excel_com import ExcelComEngine
 from ..errors import NoRunningExcelError, WorkbookNotFoundError
-from ..excel_session import ExcelSession
 from ..file_transaction import save_working_copy
 from ..models import ValidationCheck, WorkbookFingerprint
 from ..workbook_audit import collect_fingerprint
 
 
-def connect_source_readonly(source_path: Path, mode: str) -> ExcelSession:
+def connect_source_readonly(source_path: Path, mode: str) -> Any:
     """Attach to an already-open exact-path workbook, or open it read-only."""
+    from ..excel_session import ExcelSession
     if mode == "attach":
         return ExcelSession.attach(source_path)
     if mode == "open":
@@ -52,7 +52,9 @@ def connect_source_readonly(source_path: Path, mode: str) -> ExcelSession:
     raise ValueError(f"Unknown Excel access mode: {mode!r}")
 
 
-def create_working_copy(source_path: Path, working_path: Path, mode: str) -> None:
+def create_working_copy(
+    source_path: Path, working_path: Path, mode: str
+) -> WorkbookFingerprint:
     """SaveCopyAs the source into a brand-new working copy path via Excel COM.
 
     The source session is always read-only and is always closed without
@@ -60,7 +62,14 @@ def create_working_copy(source_path: Path, working_path: Path, mode: str) -> Non
     """
     session = connect_source_readonly(source_path, mode)
     try:
+        if not bool(session.source_workbook.Saved):
+            raise ValueError(
+                "Source workbook has unsaved in-memory changes; save or discard them "
+                "before creating a working copy"
+            )
+        source_fingerprint = collect_fingerprint(session.source_workbook, source_path)
         save_working_copy(session.source_workbook, working_path)
+        return source_fingerprint
     finally:
         session.close()
 
@@ -91,6 +100,8 @@ class WorkingCopyHandle:
 
 
 def open_working_copy_for_edit(working_path: Path) -> WorkingCopyHandle:
+    from ..excel_session import ExcelSession
+
     session = ExcelSession.create()
     try:
         workbook = session.open_workbook(working_path, read_only=False, update_links=False)
@@ -122,6 +133,8 @@ class ReopenedHandle:
 
 
 def reopen_working_copy(working_path: Path) -> ReopenedHandle:
+    from ..excel_session import ExcelSession
+
     session = ExcelSession.create()
     try:
         workbook = session.open_workbook(working_path, read_only=False, update_links=False)

@@ -37,8 +37,8 @@ when advanced or protected features are involved.
 
 ## Current boundary
 
-The P&L A08 recipe is the only generic mutation workflow currently proven in
-the repository. `read_range` is available as a read-only capability when Excel
-is present; universal write tools are intentionally locked until their tests
-pass on both a fake engine and real Windows Excel. A protected or damaged
-workbook may require the user to open it manually in authorized Excel first.
+`read_range` is the accepted universal read capability. Generic mutation tools
+are implemented and callable only through the guarded coordinator, but the
+latest safety remediation still requires Windows/Excel re-acceptance before
+production use. A protected workbook requires the user to open it manually in
+authorized Excel first. Never bypass that authorization.

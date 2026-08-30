@@ -8,14 +8,16 @@ mutating half (working copy, save, reopen, validate, publish) is Task 6.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+import hashlib
 from pathlib import Path
 from typing import Any, Callable
 
-from ..agent_contracts import OperationPlan, ToolRequest, ToolResult
+from ..agent_contracts import OperationPlan, ToolRequest, ToolResult, as_json
 from ..file_transaction import publish_validated_file, sha256_file
 from ..plan_validation import validate_plan
 from ..tool_executor import execute_tool as _real_execute_tool
+from ..tool_registry import describe_tool
 from ..transaction_state import TransactionContext, TransactionState
 from .transaction_adapter import compare_generic_preservation
 from .transaction_adapter import create_working_copy as _real_create_working_copy
@@ -23,7 +25,7 @@ from .transaction_adapter import open_working_copy_for_edit as _real_open_workin
 from .transaction_adapter import reopen_working_copy as _real_reopen_working_copy
 
 ExecuteToolFn = Callable[..., ToolResult]
-CreateWorkingCopyFn = Callable[[Path, Path, str], None]
+CreateWorkingCopyFn = Callable[[Path, Path, str], Any]
 OpenWorkingCopyFn = Callable[[Path], Any]
 ReopenWorkingCopyFn = Callable[[Path], Any]
 
@@ -35,6 +37,7 @@ class DryRunResult:
     context: TransactionContext
     plan_errors: tuple[str, ...] = ()
     awaiting_approval: bool = False
+    approved_plan_digest: str | None = None
 
     @property
     def ok(self) -> bool:
@@ -50,8 +53,28 @@ class DryRunResult:
             "state": self.context.state.value,
             "plan_errors": list(self.plan_errors),
             "awaiting_approval": self.awaiting_approval,
+            "approved_plan_digest": self.approved_plan_digest,
             "journal_path": str(self.context.journal_path),
         }
+
+
+def _plan_digest(plan: OperationPlan) -> str:
+    return hashlib.sha256(as_json(plan).encode("utf-8")).hexdigest()
+
+
+def _fail_safe_best_effort(
+    context: TransactionContext,
+    error: BaseException | str,
+    *,
+    evidence: dict[str, Any] | None = None,
+) -> None:
+    """Record a terminal failure without allowing error handling to mask it."""
+    try:
+        context.fail_safe(error, evidence=evidence)
+    except Exception:
+        # The in-memory state must still be terminal even if the journal path
+        # itself became unavailable during the failure.
+        context.state = TransactionState.FAILED_SAFE
 
 
 def run_dry_run(
@@ -80,8 +103,10 @@ def run_dry_run(
     root = Path(project_root).expanduser().resolve() if project_root else artifact_root
 
     context = TransactionContext(source_path, artifact_root, transaction_id=plan.transaction_id)
-    context.acquire_workspace_lock()
+    lock_acquired = False
     try:
+        context.acquire_workspace_lock()
+        lock_acquired = True
         probe_result = execute_tool_fn(
             ToolRequest.new("inspect_file", arguments={"file": str(source_path)})
         )
@@ -132,8 +157,6 @@ def run_dry_run(
         context.transition(TransactionState.SNAPSHOTTED, evidence=snapshot_result.after_evidence)
 
         plan_errors = list(validate_plan(plan))
-        if plan.transaction_id != context.transaction_id:
-            plan_errors.append("plan transaction_id does not match this transaction")
         if plan_errors:
             context.fail_safe("Plan validation failed", evidence={"errors": plan_errors})
             return DryRunResult(context, plan_errors=tuple(plan_errors))
@@ -143,11 +166,22 @@ def run_dry_run(
         )
 
         if plan.requires_approval and not approved:
-            return DryRunResult(context, awaiting_approval=True)
+            return DryRunResult(
+                context,
+                awaiting_approval=True,
+                approved_plan_digest=_plan_digest(plan),
+            )
         context.transition(TransactionState.APPROVED, evidence={"approved_explicitly": bool(approved)})
-        return DryRunResult(context)
+        return DryRunResult(context, approved_plan_digest=_plan_digest(plan))
+    except Exception as exc:
+        _fail_safe_best_effort(context, exc, evidence={"stage": "dry_run"})
+        return DryRunResult(context, plan_errors=(f"Dry-run failed safely: {exc}",))
     finally:
-        context.release_workspace_lock()
+        if lock_acquired:
+            try:
+                context.release_workspace_lock()
+            except Exception as exc:
+                _fail_safe_best_effort(context, exc, evidence={"stage": "release_dry_run_lock"})
 
 
 @dataclass
@@ -197,11 +231,37 @@ def run_execute(
         )
         return ExecuteResult(context)
 
-    context.acquire_workspace_lock()
+    plan_errors = validate_plan(plan)
+    if plan.transaction_id != context.transaction_id:
+        plan_errors.append("plan transaction_id does not match the approved transaction")
+    if dry_run.approved_plan_digest != _plan_digest(plan):
+        plan_errors.append("execution plan differs from the plan approved during dry-run")
+    mutating_steps = []
+    for step in plan.steps:
+        spec = describe_tool(step.tool)
+        if spec and spec.get("mutates_workbook"):
+            mutating_steps.append(step)
+            if step.request.dry_run:
+                plan_errors.append(
+                    f"mutating step {step.step_id} is still dry-run and cannot be executed"
+                )
+    if not mutating_steps:
+        plan_errors.append("execute requires at least one approved mutating step")
+    if plan_errors:
+        _fail_safe_best_effort(
+            context,
+            "Execution plan validation failed",
+            evidence={"errors": plan_errors},
+        )
+        return ExecuteResult(context)
+
+    lock_acquired = False
     step_results: list[ToolResult] = []
     working_handle = None
     reopened_handle = None
     try:
+        context.acquire_workspace_lock()
+        lock_acquired = True
         current_source_hash = sha256_file(context.source_path)
         if current_source_hash != context.source_sha256:
             context.fail_safe(
@@ -214,7 +274,7 @@ def run_execute(
         working_dir.mkdir(parents=True, exist_ok=True)
         working_path = working_dir / f"{context.source_path.stem}__WORKING{context.source_path.suffix}"
         try:
-            create_working_copy_fn(context.source_path, working_path, excel_mode)
+            source_copy_fp = create_working_copy_fn(context.source_path, working_path, excel_mode)
         except Exception as exc:
             context.fail_safe(f"Working copy creation failed: {exc}")
             return ExecuteResult(context)
@@ -227,6 +287,21 @@ def run_execute(
             context.fail_safe(f"Could not open the working copy for edit: {exc}")
             return ExecuteResult(context)
         before_edit_fp = working_handle.fingerprint()
+        if source_copy_fp is None:
+            context.fail_safe("Working-copy creation did not return a source fingerprint")
+            working_handle.discard()
+            working_handle = None
+            return ExecuteResult(context)
+        copy_checks = compare_generic_preservation(source_copy_fp, before_edit_fp)
+        failed = [check for check in copy_checks if check.required and not check.passed]
+        if failed:
+            context.fail_safe(
+                "Source-to-working-copy preservation check failed",
+                evidence={"failed_checks": [check.name for check in failed]},
+            )
+            working_handle.discard()
+            working_handle = None
+            return ExecuteResult(context)
 
         context.transition(TransactionState.EXECUTING, evidence={"step_count": len(plan.steps)})
         for step in plan.steps:
@@ -236,6 +311,15 @@ def run_execute(
                 context.fail_safe(
                     f"Plan step failed: {step.step_id}",
                     evidence={"step_id": step.step_id, "tool": step.tool, "error": result.to_dict()},
+                )
+                working_handle.discard()
+                working_handle = None
+                return ExecuteResult(context, step_results=tuple(step_results))
+            spec = describe_tool(step.tool)
+            if spec and spec.get("mutates_workbook") and not result.changed:
+                context.fail_safe(
+                    f"Mutating plan step reported no change: {step.step_id}",
+                    evidence={"step_id": step.step_id, "tool": step.tool},
                 )
                 working_handle.discard()
                 working_handle = None
@@ -299,6 +383,9 @@ def run_execute(
         context.record_hash("output", published)
         context.transition(TransactionState.PUBLISHED, evidence={"output_path": str(published)})
         return ExecuteResult(context, output_path=published, step_results=tuple(step_results))
+    except Exception as exc:
+        _fail_safe_best_effort(context, exc, evidence={"stage": context.state.value})
+        return ExecuteResult(context, step_results=tuple(step_results))
     finally:
         if working_handle is not None:
             try:
@@ -310,4 +397,8 @@ def run_execute(
                 reopened_handle.close()
             except Exception:
                 pass
-        context.release_workspace_lock()
+        if lock_acquired:
+            try:
+                context.release_workspace_lock()
+            except Exception as exc:
+                _fail_safe_best_effort(context, exc, evidence={"stage": "release_execute_lock"})

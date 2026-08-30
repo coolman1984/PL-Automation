@@ -9,13 +9,16 @@ from __future__ import annotations
 
 import shutil
 import zipfile
+import json
+from dataclasses import replace
 from pathlib import Path
 
 from src.agent_contracts import OperationPlan, PlanStep, TargetRef, ToolRequest, ToolResult
-from src.core.coordinator import DryRunResult, ExecuteResult, run_execute
+from src.core.coordinator import DryRunResult, _plan_digest, run_execute
 from src.core.transaction_adapter import ReopenedHandle, WorkingCopyHandle
 from src.fake_engine import FakeEngine
 from src.transaction_state import TransactionContext, TransactionState
+from src.workbook_audit import collect_fingerprint
 
 
 class _Count:
@@ -89,23 +92,33 @@ def _approved_dry_run(tmp_path: Path, transaction_id: str) -> DryRunResult:
     context.transition(TransactionState.SNAPSHOTTED)
     context.transition(TransactionState.PLANNED)
     context.transition(TransactionState.APPROVED)
-    return DryRunResult(context)
+    return DryRunResult(
+        context,
+        approved_plan_digest=_plan_digest(_harmless_plan(transaction_id)),
+    )
 
 
 def _harmless_plan(transaction_id: str) -> OperationPlan:
     step = PlanStep(
         step_id="step-1",
-        tool="read_range",
-        purpose="read a cell",
+        tool="write_range",
+        purpose="write a cell on the working copy",
         request=ToolRequest(
             schema_version="1.0",
             transaction_id=transaction_id,
-            tool="read_range",
+            tool="write_range",
             target=TargetRef("working-copy", sheet="Sheet1", address="A1"),
+            arguments={"values": [["updated"]]},
+            expected_effect={"changed": True},
             dry_run=False,
         ),
     )
-    return OperationPlan(transaction_id=transaction_id, intent="test", steps=(step,))
+    return OperationPlan(
+        transaction_id=transaction_id,
+        intent="test",
+        requires_approval=True,
+        steps=(step,),
+    )
 
 
 def _fake_ops(sheet_names=("Sheet1",), fail_step: bool = False):
@@ -113,9 +126,13 @@ def _fake_ops(sheet_names=("Sheet1",), fail_step: bool = False):
     state = {}
 
     def create_working_copy(source_path: Path, working_path: Path, mode: str) -> None:
+        source_fingerprint = collect_fingerprint(
+            _FakeWorkbook(source_path, list(sheet_names)), source_path
+        )
         working_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source_path, working_path)
         state["path"] = working_path
+        return source_fingerprint
 
     def open_working_copy(working_path: Path) -> WorkingCopyHandle:
         workbook = _FakeWorkbook(working_path, list(sheet_names))
@@ -144,7 +161,7 @@ def _fake_execute_tool(fail: bool = False):
             from src.agent_contracts import ToolError
 
             return ToolResult.failure(request.tool, ToolError(code="simulated", message="boom"))
-        return ToolResult.success(request.tool, changed=False, after_evidence={"values": [["hello"]]})
+        return ToolResult.success(request.tool, changed=True, after_evidence={"values": [["updated"]]})
 
     return fake
 
@@ -260,13 +277,135 @@ def test_preservation_violation_after_edits_fails_closed_before_save(tmp_path):
         # Simulate an engine operation that silently added a sheet: the next
         # fingerprint() call must see the extra sheet.
         handle_holder["handle"]._workbook._sheet_names.append("UnexpectedNewSheet")
-        return ToolResult.success(request.tool, changed=False, after_evidence={})
+        return ToolResult.success(request.tool, changed=True, after_evidence={})
 
     result = run_execute(
         dry_run,
         plan,
         execute_tool_fn=fake_execute_tool_that_mutates,
         create_working_copy_fn=create_fn,
+        open_working_copy_fn=open_fn,
+        reopen_working_copy_fn=reopen_fn,
+    )
+
+    assert result.context.state == TransactionState.FAILED_SAFE
+    assert result.output_path is None
+
+
+def test_execute_refuses_a_mutating_step_left_in_dry_run_mode(tmp_path):
+    transaction_id = "run-exec-dry-mutation"
+    executable = _harmless_plan(transaction_id)
+    dry_request = replace(executable.steps[0].request, dry_run=True)
+    dry_step = replace(executable.steps[0], request=dry_request)
+    plan = replace(executable, steps=(dry_step,))
+    dry_run = _approved_dry_run(tmp_path, transaction_id)
+    dry_run.approved_plan_digest = _plan_digest(plan)
+    create_fn, open_fn, reopen_fn = _fake_ops()
+
+    result = run_execute(
+        dry_run,
+        plan,
+        execute_tool_fn=_fake_execute_tool(),
+        create_working_copy_fn=create_fn,
+        open_working_copy_fn=open_fn,
+        reopen_working_copy_fn=reopen_fn,
+    )
+
+    assert result.context.state == TransactionState.FAILED_SAFE
+    assert result.output_path is None
+
+
+def test_execute_refuses_plan_swap_after_approval(tmp_path):
+    transaction_id = "run-exec-plan-swap"
+    approved_plan = _harmless_plan(transaction_id)
+    dry_run = _approved_dry_run(tmp_path, transaction_id)
+    swapped_plan = replace(approved_plan, intent="different unapproved intent")
+    create_fn, open_fn, reopen_fn = _fake_ops()
+
+    result = run_execute(
+        dry_run,
+        swapped_plan,
+        execute_tool_fn=_fake_execute_tool(),
+        create_working_copy_fn=create_fn,
+        open_working_copy_fn=open_fn,
+        reopen_working_copy_fn=reopen_fn,
+    )
+
+    assert result.context.state == TransactionState.FAILED_SAFE
+    assert result.output_path is None
+
+
+def test_mutating_step_that_reports_no_change_is_never_published(tmp_path):
+    transaction_id = "run-exec-no-change"
+    dry_run = _approved_dry_run(tmp_path, transaction_id)
+    plan = _harmless_plan(transaction_id)
+    create_fn, open_fn, reopen_fn = _fake_ops()
+
+    def no_change(request, **_kwargs):
+        return ToolResult.success(request.tool, changed=False)
+
+    result = run_execute(
+        dry_run,
+        plan,
+        execute_tool_fn=no_change,
+        create_working_copy_fn=create_fn,
+        open_working_copy_fn=open_fn,
+        reopen_working_copy_fn=reopen_fn,
+    )
+
+    assert result.context.state == TransactionState.FAILED_SAFE
+    assert result.output_path is None
+
+
+def test_unhandled_save_failure_is_caught_and_persisted_failed_safe(tmp_path):
+    transaction_id = "run-exec-save-failure"
+    dry_run = _approved_dry_run(tmp_path, transaction_id)
+    plan = _harmless_plan(transaction_id)
+    create_fn, _, reopen_fn = _fake_ops()
+
+    class _SaveFailsWorkbook(_FakeWorkbook):
+        def Save(self):
+            raise OSError("simulated disk failure")
+
+    def open_fn(working_path: Path) -> WorkingCopyHandle:
+        workbook = _SaveFailsWorkbook(working_path, ["Sheet1"])
+        return WorkingCopyHandle(
+            engine=FakeEngine({"Sheet1": {"1,1": "hello"}}),
+            _session=_NoopSession(),
+            _workbook=workbook,
+            _path=working_path,
+        )
+
+    result = run_execute(
+        dry_run,
+        plan,
+        execute_tool_fn=_fake_execute_tool(),
+        create_working_copy_fn=create_fn,
+        open_working_copy_fn=open_fn,
+        reopen_working_copy_fn=reopen_fn,
+    )
+
+    persisted = json.loads(result.context.journal_path.read_text(encoding="utf-8"))
+    assert result.context.state == TransactionState.FAILED_SAFE
+    assert persisted["state"] == TransactionState.FAILED_SAFE.value
+    assert any(event["event"] == "failed_safe" for event in persisted["events"])
+
+
+def test_source_to_working_copy_fidelity_mismatch_blocks_execution(tmp_path):
+    transaction_id = "run-exec-copy-fidelity"
+    dry_run = _approved_dry_run(tmp_path, transaction_id)
+    plan = _harmless_plan(transaction_id)
+    create_fn, open_fn, reopen_fn = _fake_ops()
+
+    def mismatched_create(source_path: Path, working_path: Path, mode: str):
+        create_fn(source_path, working_path, mode)
+        return collect_fingerprint(_FakeWorkbook(source_path, ["DifferentSheet"]), source_path)
+
+    result = run_execute(
+        dry_run,
+        plan,
+        execute_tool_fn=_fake_execute_tool(),
+        create_working_copy_fn=mismatched_create,
         open_working_copy_fn=open_fn,
         reopen_working_copy_fn=reopen_fn,
     )

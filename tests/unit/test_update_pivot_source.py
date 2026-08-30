@@ -143,3 +143,39 @@ def test_update_pivot_source_updates_and_refreshes():
     assert result.before_evidence["source_data"] == "'DB File'!$A$1:$C$10"
     assert result.after_evidence["source_data"] == "'DB File'!$A$1:$C$20"
     assert any(call == ("update_pivot_source", "PV!Sales") for call in engine.calls)
+
+
+def test_update_pivot_source_fails_closed_when_actual_source_is_unresolvable():
+    engine = _engine_with_pivot(source_data="SalesTable")
+    engine.pivot_tables["PV!Sales"]["source_bounds"] = None
+    engine.resolve_source_bounds = lambda _address: None
+    request = ToolRequest.new(
+        "update_pivot_source",
+        target=TargetRef("working-copy", sheet="PV", object_name="Sales"),
+        arguments={"expected_current_source": "SalesTable", "new_source": "SalesTable"},
+        dry_run=False,
+    )
+
+    result = execute_tool(request, engine=engine)
+
+    assert result.ok is False
+    assert result.error.code == "expected_current_source_unresolvable"
+    assert not any(call[0] == "update_pivot_source" for call in engine.calls)
+
+
+def test_update_pivot_source_never_treats_none_bounds_as_equal():
+    engine = _engine_with_pivot(source_data="SalesTable")
+    engine.pivot_tables["PV!Sales"]["source_bounds"] = None
+    engine.resolve_source_bounds = lambda _address: ("DB File", 1, 1, 10, 3)
+    request = ToolRequest.new(
+        "update_pivot_source",
+        target=TargetRef("working-copy", sheet="PV", object_name="Sales"),
+        arguments={"expected_current_source": "SalesTable", "new_source": "SalesTable"},
+        dry_run=False,
+    )
+
+    result = execute_tool(request, engine=engine)
+
+    assert result.ok is False
+    assert result.error.code == "actual_current_source_unresolvable"
+    assert not any(call[0] == "update_pivot_source" for call in engine.calls)

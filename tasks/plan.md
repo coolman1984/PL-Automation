@@ -7,6 +7,6 @@ The canonical implementation plan is:
 Execute one task at a time in dependency order. V1 is historical context and
 must not override V2 task order or acceptance gates.
 
-Current start point: **Task 3 — Deterministic read-only COM acceptance harness**
-(Tasks 1–2 are complete with focused tests and full unit/contract suites green).
-
+Current start point: **Windows/Excel safety re-acceptance for Checkpoints B and
+C.** The D1-D16 remediation is complete in code with regression tests, but the
+corrected mutation paths must pass on real Excel before Task 12 begins.

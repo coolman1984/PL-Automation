@@ -22,6 +22,7 @@ from .file_probe import resolve_com_mode
 # chunking only after measuring the real payload"). This bounds a single
 # bulk range operation instead of silently attempting an unbounded one.
 _MAX_CELLS_PER_RANGE_OPERATION = 200_000
+_MAX_COLUMNS_PER_INSERT = 256
 
 
 def _error(tool: str, code: str, message: str, *, recoverable: bool = True, action: str | None = None, details: Mapping[str, Any] | None = None) -> ToolResult:
@@ -168,6 +169,27 @@ def _require_target(request: ToolRequest) -> ToolResult | None:
             action="Resolve the exact target before calling the tool.",
         )
     return None
+
+
+def _require_working_copy_target(request: ToolRequest) -> ToolResult | None:
+    if request.target is None or request.target.workbook_id not in {"working-copy", ""}:
+        return _error(
+            request.tool,
+            "invalid_target_workbook",
+            f"{request.tool} may only target the Excel-created working copy, not the source.",
+            action="Resolve a working-copy target through the approved coordinator transaction.",
+        )
+    return None
+
+
+def _bounded_shape(engine: Any, target: TargetRef) -> tuple[int, int, int]:
+    resolver = getattr(engine, "validate_bounded_range", engine.resolve_bounds)
+    first_row, first_col, last_row, last_col = resolver(target)
+    rows = last_row - first_row + 1
+    columns = last_col - first_col + 1
+    if rows < 1 or columns < 1:
+        raise ValueError("Resolved range is empty")
+    return rows, columns, rows * columns
 
 
 def execute_tool(
@@ -361,23 +383,31 @@ def execute_tool(
         return target_error
 
     if tool == "clear_range":
-        if normalized.target.workbook_id not in {"working-copy", ""}:  # type: ignore[union-attr]
-            return _error(
-                tool,
-                "invalid_target_workbook",
-                "clear_range may only target the Excel-created working copy, not the source.",
-                action="Resolve a working-copy target through the coordinator's transaction.",
-            )
+        target_guard = _require_working_copy_target(normalized)
+        if target_guard is not None:
+            return target_guard
         if engine is None:
             return _error(tool, "engine_required", "No workbook engine was attached to this request.", action="Select and open a compatible engine before range operations.")
         expected_cell_count = normalized.arguments.get("expected_cell_count")
         if not isinstance(expected_cell_count, int) or isinstance(expected_cell_count, bool) or expected_cell_count < 1:
             return _error(tool, "expected_cell_count_required", "arguments.expected_cell_count must name the exact positive number of cells being cleared.")
         try:
+            range_rows, range_columns, actual_cell_count = _bounded_shape(engine, normalized.target)
+            if actual_cell_count > _MAX_CELLS_PER_RANGE_OPERATION:
+                return _error(
+                    tool,
+                    "range_too_large",
+                    f"{actual_cell_count} cells exceeds the current limit of {_MAX_CELLS_PER_RANGE_OPERATION}.",
+                    details={"cell_count": actual_cell_count, "limit": _MAX_CELLS_PER_RANGE_OPERATION},
+                )
             before_values = engine.read_values(normalized.target)
         except Exception as exc:
             return _error(tool, "before_fingerprint_failed", str(exc), details={"target": normalized.target.to_dict()})
-        actual_cell_count = sum(len(row) for row in before_values)
+        observed_shape = _shape(before_values)
+        if observed_shape != (range_rows, range_columns):
+            # A COM union range can return only its first area; the resolved
+            # bounded shape and returned matrix must therefore agree exactly.
+            return _error(tool, "range_shape_mismatch", "Resolved range evidence is incomplete; refusing to clear it.")
         if actual_cell_count != expected_cell_count:
             return _error(
                 tool,
@@ -431,8 +461,9 @@ def execute_tool(
             return _error(tool, "expected_target_row_count_required", "arguments.expected_target_row_count must be a positive integer.")
 
         try:
-            t_first_row, t_first_col, t_last_row, t_last_col = engine.resolve_bounds(template_target)
-            d_first_row, d_first_col, d_last_row, d_last_col = engine.resolve_bounds(normalized.target)
+            resolver = getattr(engine, "validate_bounded_range", engine.resolve_bounds)
+            t_first_row, t_first_col, t_last_row, t_last_col = resolver(template_target)
+            d_first_row, d_first_col, d_last_row, d_last_col = resolver(normalized.target)
         except Exception as exc:
             return _error(tool, "range_resolution_failed", str(exc))
 
@@ -447,6 +478,13 @@ def execute_tool(
                 f"The target range must start immediately below the template row (expected row {t_first_row + 1}, got {d_first_row}).",
             )
         actual_row_count = d_last_row - d_first_row + 1
+        target_cell_count = actual_row_count * (d_last_col - d_first_col + 1)
+        if target_cell_count > _MAX_CELLS_PER_RANGE_OPERATION:
+            return _error(
+                tool,
+                "range_too_large",
+                f"{target_cell_count} cells exceeds the current limit of {_MAX_CELLS_PER_RANGE_OPERATION}.",
+            )
         if actual_row_count != expected_row_count:
             return _error(
                 tool,
@@ -525,6 +563,12 @@ def execute_tool(
         count = normalized.arguments.get("count")
         if not isinstance(count, int) or isinstance(count, bool) or count < 1:
             return _error(tool, "count_required", "arguments.count must be a positive integer.")
+        if count > _MAX_COLUMNS_PER_INSERT:
+            return _error(
+                tool,
+                "column_count_too_large",
+                f"Column insertion count {count} exceeds the safety limit of {_MAX_COLUMNS_PER_INSERT}.",
+            )
         expected_anchor = normalized.arguments.get("expected_anchor_column")
         if not isinstance(expected_anchor, str) or not expected_anchor.strip():
             return _error(tool, "expected_anchor_column_required", "arguments.expected_anchor_column must name the exact column letter (e.g. 'D').")
@@ -542,6 +586,7 @@ def execute_tool(
                 action="Recompute the exact expected anchor column before retrying.",
             )
         try:
+            engine.calculate_sheet(str(normalized.target.sheet))
             errors_before = engine.count_formula_errors(str(normalized.target.sheet))
         except Exception as exc:
             return _error(tool, "before_fingerprint_failed", str(exc))
@@ -558,6 +603,7 @@ def execute_tool(
         except Exception as exc:
             return _error(tool, "engine_operation_failed", str(exc))
         try:
+            engine.calculate_sheet(str(normalized.target.sheet))
             errors_after = engine.count_formula_errors(str(normalized.target.sheet))
         except Exception as exc:
             return _error(tool, "after_fingerprint_failed", str(exc))
@@ -616,7 +662,21 @@ def execute_tool(
             expected_bounds = engine.resolve_source_bounds(expected_current_source)
         except Exception as exc:
             return _error(tool, "expected_current_source_unresolvable", str(exc))
-        if info.get("source_bounds") != expected_bounds:
+        actual_bounds = info.get("source_bounds")
+        if expected_bounds is None:
+            return _error(
+                tool,
+                "expected_current_source_unresolvable",
+                "The expected current PivotTable source could not be resolved safely.",
+            )
+        if actual_bounds is None:
+            return _error(
+                tool,
+                "actual_current_source_unresolvable",
+                f"The actual PivotTable source {info.get('source_data')!r} could not be resolved safely.",
+                recoverable=False,
+            )
+        if actual_bounds != expected_bounds:
             return _error(
                 tool,
                 "current_source_mismatch",
@@ -644,6 +704,17 @@ def execute_tool(
             )
 
         try:
+            new_bounds = engine.resolve_source_bounds(new_source)
+        except Exception as exc:
+            return _error(tool, "new_source_unresolvable", str(exc))
+        if new_bounds is None:
+            return _error(
+                tool,
+                "new_source_unresolvable",
+                "The requested new PivotTable source could not be resolved safely.",
+            )
+
+        try:
             engine.update_pivot_source(sheet, pivot_name, new_source)
         except Exception as exc:
             return _error(tool, "engine_operation_failed", str(exc))
@@ -652,11 +723,8 @@ def execute_tool(
             after_info = engine.inspect_pivot_table(sheet, pivot_name)
         except Exception as exc:
             return _error(tool, "after_fingerprint_failed", str(exc))
-        try:
-            new_bounds = engine.resolve_source_bounds(new_source)
-        except Exception as exc:
-            return _error(tool, "new_source_unresolvable", str(exc))
-        if after_info.get("source_bounds") != new_bounds:
+        after_bounds = after_info.get("source_bounds")
+        if after_bounds is None or after_bounds != new_bounds:
             return _error(
                 tool,
                 "source_update_did_not_apply",
@@ -677,6 +745,10 @@ def execute_tool(
     if tool in {"read_range", "write_range", "set_formula", "copy_range"}:
         if engine is None:
             return _error(tool, "engine_required", "No workbook engine was attached to this request.", action="Select and open a compatible engine before range operations.")
+        if tool != "read_range":
+            target_guard = _require_working_copy_target(normalized)
+            if target_guard is not None:
+                return target_guard
         try:
             if tool == "read_range":
                 values = engine.read_values(normalized.target)
@@ -693,13 +765,29 @@ def execute_tool(
                     return _error(tool, "source_required", "copy_range needs an explicit source target.")
                 source_target = TargetRef.from_dict(source)
                 mode = str(normalized.arguments.get("mode", "all"))
-                if source_target.workbook_id not in {"working-copy", "source", ""}:
+                if source_target.workbook_id not in {"working-copy", ""}:
                     return _error(
                         tool,
                         "cross_workbook_copy_unsupported",
-                        "copy_range only supports a source range already open in the same "
-                        "engine session; cross-workbook copies are not yet released.",
+                        "copy_range only supports a source range on the approved working copy; "
+                        "source and foreign workbook identifiers are refused.",
                         action="Read the other workbook's range first, then write_range the values into this workbook.",
+                    )
+                source_rows, source_columns, source_cell_count = _bounded_shape(engine, source_target)
+                dest_rows, dest_columns, _ = _bounded_shape(engine, normalized.target)
+                if (source_rows, source_columns) != (dest_rows, dest_columns):
+                    return _error(
+                        tool,
+                        "shape_mismatch",
+                        f"Source range shape {(source_rows, source_columns)} does not match "
+                        f"destination range shape {(dest_rows, dest_columns)}.",
+                    )
+                if source_cell_count > _MAX_CELLS_PER_RANGE_OPERATION:
+                    return _error(
+                        tool,
+                        "range_too_large",
+                        f"{source_cell_count} cells exceeds the current limit of {_MAX_CELLS_PER_RANGE_OPERATION}.",
+                        details={"cell_count": source_cell_count, "limit": _MAX_CELLS_PER_RANGE_OPERATION},
                     )
                 try:
                     source_values = engine.read_values(source_target)
@@ -711,22 +799,15 @@ def execute_tool(
                 except Exception as exc:
                     return _error(tool, "before_fingerprint_failed", str(exc), details={"target": normalized.target.to_dict()})
                 dest_shape = _shape(dest_before_values)
-                if source_shape is None or dest_shape is None or source_shape != dest_shape:
+                expected_shape = (source_rows, source_columns)
+                if source_shape != expected_shape or dest_shape != expected_shape:
                     return _error(
                         tool,
                         "shape_mismatch",
                         f"Source range shape {source_shape} does not match destination range shape {dest_shape}.",
                         details={"source_shape": source_shape, "destination_shape": dest_shape},
                     )
-                cell_count = source_shape[0] * source_shape[1]
-                if cell_count > _MAX_CELLS_PER_RANGE_OPERATION:
-                    return _error(
-                        tool,
-                        "range_too_large",
-                        f"{cell_count} cells exceeds the current chunking-free limit of {_MAX_CELLS_PER_RANGE_OPERATION}.",
-                        details={"cell_count": cell_count, "limit": _MAX_CELLS_PER_RANGE_OPERATION},
-                        action="Split the range into smaller bounded operations.",
-                    )
+                cell_count = source_cell_count
                 if normalized.dry_run:
                     return ToolResult.success(
                         tool,
@@ -748,9 +829,17 @@ def execute_tool(
             argument_name = "values" if tool == "write_range" else "formulas"
             payload = normalized.arguments.get(argument_name)
             shape = _shape(payload)
-            if shape is None:
+            if shape is None or shape[0] < 1 or shape[1] < 1:
                 return _error(tool, "invalid_matrix", f"arguments.{argument_name} must be a rectangular two-dimensional array.")
-            cell_count = shape[0] * shape[1]
+            target_rows, target_columns, cell_count = _bounded_shape(engine, normalized.target)
+            if shape != (target_rows, target_columns):
+                return _error(
+                    tool,
+                    "shape_mismatch",
+                    f"Payload shape {shape} does not match target range shape "
+                    f"{(target_rows, target_columns)}.",
+                    details={"payload_shape": shape, "target_shape": (target_rows, target_columns)},
+                )
             if cell_count > _MAX_CELLS_PER_RANGE_OPERATION:
                 return _error(
                     tool,

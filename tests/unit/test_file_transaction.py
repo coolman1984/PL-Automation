@@ -7,12 +7,13 @@ from pathlib import Path
 
 import pytest
 
-from src.errors import PublicationError
+from src.errors import PublicationError, WorkbookFormatError
 from src.file_transaction import (
     create_run_paths,
     make_run_id,
     publish_validated_file,
     publish_validated_workbook,
+    save_working_copy,
 )
 
 
@@ -82,3 +83,28 @@ def test_generic_publish_supports_xlsx_and_requires_matching_extension(tmp_path)
     assert final.read_bytes() == b"xlsx bytes"
     with pytest.raises(PublicationError):
         publish_validated_file(working, tmp_path / "wrong.xlsb")
+
+
+def test_generic_working_copy_accepts_xlsx_without_leaving_an_orphan_error(tmp_path):
+    working = tmp_path / "working.xlsx"
+
+    class Workbook:
+        def SaveCopyAs(self, path):
+            Path(path).write_bytes(b"xlsx bytes")
+
+    save_working_copy(Workbook(), working)
+
+    assert working.read_bytes() == b"xlsx bytes"
+
+
+def test_unsupported_working_copy_extension_is_rejected_before_excel_writes(tmp_path):
+    calls = []
+
+    class Workbook:
+        def SaveCopyAs(self, path):
+            calls.append(path)
+
+    with pytest.raises(WorkbookFormatError, match="supported Excel format"):
+        save_working_copy(Workbook(), tmp_path / "working.txt")
+
+    assert calls == []

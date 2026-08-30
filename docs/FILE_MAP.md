@@ -17,12 +17,12 @@
 | `src/agent_entry.py` | Start/status/description output | M1 |
 | `src/plan_validation.py` | Deterministic pre-execution plan checks | M1 |
 | `src/transaction_state.py` | Generic fail-closed states, workspace locking, hash stages, and auto-persisted journal with safe resume | M3 |
-| `src/core/coordinator.py` | Generic coordinator: dry-run half (probe/backup/snapshot/plan-validate/approve) plus the mutating half (working copy/execute/save/reopen/validate/publish), all fail-closed | M3 |
-| `src/core/transaction_adapter.py` | Workflow-agnostic Excel session adapters (working copy, reopen, generic preservation checks) the coordinator composes | M3 |
+| `src/core/coordinator.py` | Approved-plan digest, execution revalidation, working-copy fidelity gate, real-change enforcement, save/reopen/publish, and catch-all fail-safe handling | M4 remediation |
+| `src/core/transaction_adapter.py` | Refuses unsaved attached sources, returns the source fingerprint, and owns generic working-copy/reopen adapters | M4 remediation |
 | `src/engines/excel_com.py` / `src/fake_engine.py` | Also implement `clear_range` (ClearContents-only, bounded) | M4 |
-| `src/tool_executor.py` | Also implements `clear_range`, hardened `write_range`/`copy_range` (shape checks, before-evidence, `_MAX_CELLS_PER_RANGE_OPERATION` cap, cross-workbook guard), `fill_formula_down`, `insert_columns`, and `update_pivot_source` | M4 |
+| `src/tool_executor.py` | Bounded mutations with working-copy-only targets, exact shape checks, pre-read caps, formula recalculation/error gates, and fail-closed PivotTable source checks | M4 remediation |
 | `src/business_sheet_updater.py`, `src/total_pl_updater.py` | Fixed a real pywin32 kwarg bug in the production column-insert step (`Resize(ColumnSize=...)` -> `Range(col1, col2)`) found while verifying the new generic `insert_columns` tool against real Excel | M1 |
-| `src/engines/excel_com.py` | Explicit-target Excel COM adapter | M2 |
+| `src/engines/excel_com.py` | Explicit-target COM adapter; finite-range validation, table-backed pivot resolution, format-copy cleanup, and formula-error counting | M4 remediation |
 | `src/engines/router.py` | Probe-to-engine decision policy | M2 |
 | `src/engines/` | COM and fast-engine adapters | planned |
 | `src/tools/` | Universal Excel operations | planned |
@@ -31,6 +31,7 @@
 | `tasks/plan.md` | Short pointer to the canonical V2 plan and current starting task | active |
 | `tasks/todo.md` | Execution checklist for V2 Tasks 1-16 and release checkpoints | active |
 | `tests/unit/` | Pure logic and safety tests | active |
+| `tests/unit/test_transaction_adapter.py` | Unsaved-source working-copy regression gate | M4 remediation |
 | `tests/contract/` | Tool and engine contract tests | M1 |
 | `tests/integration/` | Gated real Excel tests | active |
 | `schemas/` | Versioned machine-readable contracts | M1 |

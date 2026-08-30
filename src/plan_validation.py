@@ -16,6 +16,11 @@ def validate_plan(plan: OperationPlan) -> list[str]:
         if step.step_id in seen_ids:
             errors.append(f"duplicate step_id: {step.step_id}")
         seen_ids.add(step.step_id)
+        if step.tool != step.request.tool:
+            errors.append(
+                f"step {step.step_id} declares {step.tool} but request dispatches "
+                f"{step.request.tool}"
+            )
         spec = describe_tool(step.tool)
         if spec is None:
             errors.append(f"unknown tool: {step.tool}")
@@ -26,8 +31,12 @@ def validate_plan(plan: OperationPlan) -> list[str]:
             errors.append(f"step {step.step_id} uses a different transaction_id")
         if spec["mutates_workbook"] and not spec["requires_backup"]:
             errors.append(f"mutating tool is missing backup requirement: {step.tool}")
-        if spec["mutates_workbook"] and step.request.dry_run is False and not plan.requires_approval:
+        if spec["mutates_workbook"] and not plan.requires_approval:
             errors.append(f"mutating execution requires explicit approval: {step.tool}")
+        if spec["mutates_workbook"] and step.request.expected_effect.get("changed") is not True:
+            errors.append(
+                f"mutating step must explicitly expect changed=true: {step.tool}"
+            )
     if plan.unresolved:
         errors.append("plan contains unresolved items")
     return errors

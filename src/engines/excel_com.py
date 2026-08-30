@@ -18,6 +18,7 @@ from ..constants import (
     XL_DATABASE_SOURCE_TYPE,
     XL_ERRORS,
     XL_FORMAT_FROM_LEFT_OR_ABOVE,
+    XL_PASTE_FORMATS,
     XL_TO_RIGHT,
 )
 from ..engine_contract import EngineCapabilities
@@ -225,7 +226,13 @@ class ExcelComEngine:
                 destination_range.Formula = source_range.Formula
             return
         source_range.Copy()
-        destination_range.PasteSpecial(Paste="formats")
+        try:
+            destination_range.PasteSpecial(Paste=XL_PASTE_FORMATS)
+        finally:
+            try:
+                self.workbook.Application.CutCopyMode = False
+            except Exception:
+                pass
 
     def clear_range(self, target: TargetRef) -> None:
         if self.read_only:
@@ -241,6 +248,31 @@ class ExcelComEngine:
         last_row = first_row + _safe_int(cell_range.Rows.Count) - 1
         last_col = first_col + _safe_int(cell_range.Columns.Count) - 1
         return first_row, first_col, last_row, last_col
+
+    def validate_bounded_range(self, target: TargetRef) -> tuple[int, int, int, int]:
+        """Resolve one finite rectangle and reject union/entire-axis ranges."""
+        cell_range = self._resolve_target(target)
+        areas = getattr(cell_range, "Areas", None)
+        if _safe_int(getattr(areas, "Count", 1), 1) != 1:
+            raise ValueError("Multi-area ranges are not supported for mutation")
+        worksheet = self._worksheet(str(target.sheet))
+        row_count = _safe_int(cell_range.Rows.Count)
+        column_count = _safe_int(cell_range.Columns.Count)
+        if row_count >= _safe_int(worksheet.Rows.Count) or column_count >= _safe_int(worksheet.Columns.Count):
+            raise ValueError("Whole-row and whole-column ranges are not supported for mutation")
+        first_row = _safe_int(cell_range.Row)
+        first_col = _safe_int(cell_range.Column)
+        return (
+            first_row,
+            first_col,
+            first_row + row_count - 1,
+            first_col + column_count - 1,
+        )
+
+    def calculate_sheet(self, sheet: str) -> None:
+        if self.read_only:
+            raise PermissionError("The Excel engine is read-only")
+        self._worksheet(sheet).Calculate()
 
     def fill_formula_down(self, template: TargetRef, target: TargetRef) -> None:
         if self.read_only:
@@ -274,10 +306,18 @@ class ExcelComEngine:
         worksheet = self._worksheet(sheet)
         try:
             errors = worksheet.UsedRange.SpecialCells(XL_CELL_TYPE_FORMULAS, XL_ERRORS)
-            return _safe_int(errors.Count)
-        except Exception:
-            # SpecialCells raises when no matching cells exist.
-            return 0
+            areas = getattr(errors, "Areas", None)
+            area_count = _safe_int(getattr(areas, "Count", 1), 1)
+            total = 0
+            for index in range(1, area_count + 1):
+                area = areas(index) if area_count > 1 else errors
+                total += _safe_int(getattr(area, "CountLarge", getattr(area, "Count", 0)))
+            return total
+        except Exception as exc:
+            text = f"{exc!s} {getattr(exc, 'args', ())!r}".casefold()
+            if "no cells were found" in text:
+                return 0
+            raise RuntimeError(f"Could not count formula errors on {sheet}: {exc}") from exc
 
     def _resolve_pivot_table(self, sheet: str, name: str) -> object:
         worksheet = self._worksheet(sheet)
@@ -327,7 +367,7 @@ class ExcelComEngine:
             # Excel always reports SourceData in R1C1 notation regardless of
             # the notation used to set it, so callers must compare identity
             # through resolve_source_bounds rather than the raw string.
-            "source_bounds": _parse_r1c1_source(source_data),
+            "source_bounds": self.resolve_source_bounds(source_data) if source_data else None,
             "shared_with": self._pivot_sharing(cache_index, sheet, name),
         }
 
@@ -343,6 +383,22 @@ class ExcelComEngine:
         parsed = _parse_r1c1_source(address)
         if parsed is not None:
             return parsed
+        table_name = address.strip()
+        for sheet_index in range(1, _safe_int(self.workbook.Worksheets.Count) + 1):
+            worksheet = self.workbook.Worksheets(sheet_index)
+            try:
+                resolved = worksheet.ListObjects(table_name).Range
+            except Exception:
+                continue
+            first_row = _safe_int(resolved.Row)
+            first_col = _safe_int(resolved.Column)
+            return (
+                str(worksheet.Name),
+                first_row,
+                first_col,
+                first_row + _safe_int(resolved.Rows.Count) - 1,
+                first_col + _safe_int(resolved.Columns.Count) - 1,
+            )
         try:
             resolved = self.workbook.Application.Range(address)
         except Exception:
@@ -359,7 +415,16 @@ class ExcelComEngine:
         pivot = self._resolve_pivot_table(sheet, name)
         # Resolve to an actual Range first: PivotCaches().Create accepts a
         # Range object for any notation, avoiding ambiguity in the raw string.
-        new_source_range = self.workbook.Application.Range(new_source_address)
+        new_source_range = None
+        for sheet_index in range(1, _safe_int(self.workbook.Worksheets.Count) + 1):
+            worksheet = self.workbook.Worksheets(sheet_index)
+            try:
+                new_source_range = worksheet.ListObjects(new_source_address.strip()).Range
+                break
+            except Exception:
+                continue
+        if new_source_range is None:
+            new_source_range = self.workbook.Application.Range(new_source_address)
         new_cache = self.workbook.PivotCaches().Create(XL_DATABASE_SOURCE_TYPE, new_source_range)
         pivot.ChangePivotCache(new_cache)
         # A targeted refresh of only this PivotTable; never Application.RefreshAll.

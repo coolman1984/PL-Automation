@@ -7,13 +7,13 @@
 - [x] Task 4: Harden the transaction journal
 - [x] Task 5: Implement generic coordinator dry-run path
 - [x] Task 6: Implement working-copy, reopen, validation, and publication
-- [x] Checkpoint B: Generic transaction gate
+- [ ] Checkpoint B re-acceptance: rerun corrected generic transaction gate on Windows Excel
 - [x] Task 7: Release bounded `clear_range`
 - [x] Task 8: Release bulk `write_range` and `copy_range`
 - [x] Task 9: Release formula fill-down
 - [x] Task 10: Release controlled column insertion and formatting copy
 - [x] Task 11: Release PivotTable source update and targeted refresh
-- [x] Checkpoint C: Core SAP dependencies
+- [ ] Checkpoint C re-acceptance: rerun corrected mutation tools on Windows Excel
 - [ ] Task 12: Build SAP recipe preflight and dry-run plan
 - [ ] Task 13: Execute DB clear, SAP import, and formula fill
 - [ ] Task 14: Execute PV source update and targeted refresh
@@ -22,4 +22,3 @@
 
 Do not mark a task complete without its verification evidence and required
 documentation/catalogue updates.
-

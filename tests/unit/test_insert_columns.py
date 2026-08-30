@@ -66,6 +66,7 @@ def test_insert_columns_shifts_existing_content_right():
     assert engine.read_values(TargetRef("working-copy", sheet="Data", address="D1")) == [[None]]
     assert engine.read_values(TargetRef("working-copy", sheet="Data", address="F1")) == [["D-value"]]
     assert engine.read_values(TargetRef("working-copy", sheet="Data", address="G1")) == [["E-value"]]
+    assert engine.calls.count(("calculate_sheet", "Data")) == 2
 
 
 def test_insert_columns_refuses_a_source_target():

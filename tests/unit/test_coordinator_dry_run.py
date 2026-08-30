@@ -5,8 +5,6 @@ from __future__ import annotations
 import zipfile
 from pathlib import Path
 
-import pytest
-
 from src.agent_contracts import OperationPlan, PlanStep, ToolRequest, ToolResult
 from src.core.coordinator import run_dry_run
 from src.transaction_state import TransactionState

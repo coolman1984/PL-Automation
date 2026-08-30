@@ -142,6 +142,14 @@ class FakeEngine:
             raise ValueError("An address is required for the fake engine")
         return _address(target.address)
 
+    def validate_bounded_range(self, target: TargetRef) -> tuple[int, int, int, int]:
+        return self.resolve_bounds(target)
+
+    def calculate_sheet(self, sheet: str) -> None:
+        if sheet not in self.values:
+            raise KeyError(f"Sheet not found: {sheet}")
+        self.calls.append(("calculate_sheet", sheet))
+
     def fill_formula_down(self, template: TargetRef, target: TargetRef) -> None:
         """Copy the template row's formula strings verbatim into every target
         row. This fake does not simulate Excel's relative-reference row
@@ -208,4 +216,3 @@ class FakeEngine:
 
     def close(self, *, save: bool = False) -> None:
         self.calls.append(("close", "save" if save else "discard"))
-

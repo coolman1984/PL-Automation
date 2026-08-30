@@ -1,9 +1,9 @@
 # Excel Agent Foundation + P&L August Actual Automation
 
-> **Current status — NOT PRODUCTION READY (2026-08-27).** Static defects found
-> during audit were repaired and the full unit suite now passes (59 tests), but
-> the real Windows Excel/NASCA COM acceptance gates have not yet passed. Follow
-> `docs/PL_A08_AUTOMATION_DETAILED_EXECUTION_PLAN_V2_STATUS_UPDATED.md` before use.
+> **Current status — NOT PRODUCTION READY (2026-08-30).** The D1-D16 safety
+> remediation is implemented and 157 automated tests pass, but the corrected
+> mutation paths still require real Windows Excel re-acceptance. Follow
+> `docs/PROJECT_STATUS.md` before use.
 
 This tool inserts the Actual columns for **August 2026 (A08)** into the protected
 P&L workbook by driving desktop Microsoft Excel through COM only.
