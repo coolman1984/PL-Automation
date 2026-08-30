@@ -109,6 +109,43 @@ def _snapshot_with_excel(
     }
 
 
+def _read_range_with_excel(
+    source_path: Path,
+    target: TargetRef,
+    *,
+    mode: str,
+    include_formulas: bool,
+) -> dict[str, Any]:
+    """Open a workbook read-only and return JSON-safe range evidence."""
+    from .engines.excel_com import ExcelComEngine
+    from .excel_session import ExcelSession
+
+    probe = probe_excel_file(source_path)
+    if not probe.recognized:
+        raise ValueError("Workbook format is not recognized safely")
+    effective_mode = resolve_com_mode(mode, probe)
+    if effective_mode == "auto":
+        effective_mode = "open"
+    if probe.protection in {"nasca_drm", "office_encrypted"} and effective_mode != "attach":
+        raise PermissionError("Protected workbook requires authorized Excel attach mode")
+    session = ExcelSession.attach(source_path) if effective_mode == "attach" else ExcelSession.create(visible=False)
+    with session:
+        workbook = getattr(session, "source_workbook", None)
+        if workbook is None:
+            workbook = session.open_workbook(source_path, read_only=True, update_links=False)
+        engine = ExcelComEngine(workbook, session=None, workbook_id="source", read_only=True)
+        result: dict[str, Any] = {
+            "engine": "excel_com",
+            "mode": effective_mode,
+            "target": target.to_dict(),
+            "values": engine.read_values(target),
+            "workbook": engine.inspect(),
+        }
+        if include_formulas:
+            result["formulas"] = engine.read_formulas(target)
+        return result
+
+
 def _require_target(request: ToolRequest) -> ToolResult | None:
     if request.target is None:
         return _error(
@@ -266,6 +303,45 @@ def execute_tool(
         if int(exit_code) != 0:
             return _error(tool, "recipe_not_ready", f"The P&L recipe stopped with exit code {exit_code}.", details={"exit_code": int(exit_code)})
         return ToolResult.success(tool, changed=not normalized.dry_run, after_evidence={"exit_code": int(exit_code), "dry_run": normalized.dry_run}, metrics=ToolMetrics(elapsed_ms=round((time.perf_counter() - started) * 1000)))
+
+    if tool == "read_range" and normalized.target is None:
+        sheet = normalized.arguments.get("sheet")
+        address = normalized.arguments.get("address")
+        if source_path is not None and isinstance(sheet, str) and isinstance(address, str):
+            normalized = ToolRequest(
+                schema_version=normalized.schema_version,
+                transaction_id=normalized.transaction_id,
+                tool=normalized.tool,
+                target=TargetRef("source", sheet=sheet, address=address),
+                arguments=normalized.arguments,
+                preconditions=normalized.preconditions,
+                expected_effect=normalized.expected_effect,
+                dry_run=normalized.dry_run,
+            )
+
+    if tool == "read_range" and engine is None:
+        if source_path is None:
+            return _error(tool, "file_required", "A real local workbook path is required.", action="Set arguments.file to the exact source path.")
+        target_error = _require_target(normalized)
+        if target_error is not None:
+            return target_error
+        try:
+            evidence = _read_range_with_excel(
+                source_path,
+                normalized.target,  # type: ignore[arg-type]
+                mode=str(normalized.arguments.get("mode", "auto")),
+                include_formulas=bool(normalized.arguments.get("include_formulas", True)),
+            )
+        except ImportError as exc:
+            return _error(tool, "excel_dependency_missing", f"Excel execution dependencies are unavailable: {exc}", action="Run the private runtime self-check on Windows.")
+        except (OSError, PermissionError, ValueError) as exc:
+            return _error(tool, "read_failed", str(exc), details={"source": str(source_path)}, action="Check the exact workbook, sheet, range, and Excel authorization.")
+        return ToolResult.success(
+            tool,
+            affected_ranges=(_target_label(normalized.target),),
+            after_evidence=evidence,
+            metrics=ToolMetrics(elapsed_ms=round((time.perf_counter() - started) * 1000)),
+        )
 
     target_error = _require_target(normalized)
     if target_error is not None:

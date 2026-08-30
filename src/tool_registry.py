@@ -35,6 +35,20 @@ def _path_schema() -> dict[str, Any]:
     }
 
 
+def _read_range_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "required": ["file", "sheet", "address"],
+        "properties": {
+            "file": {"type": "string", "minLength": 1},
+            "sheet": {"type": "string", "minLength": 1},
+            "address": {"type": "string", "minLength": 1},
+            "mode": {"enum": ["auto", "attach", "open"]},
+        },
+        "additionalProperties": False,
+    }
+
+
 TOOLS: tuple[ToolSpec, ...] = (
     ToolSpec("list_tools", "system", "List every known tool and its readiness.", "available", False, False, False, {"type": "object", "additionalProperties": False}),
     ToolSpec("inspect_file", "safety", "Detect the Excel container, protection, complexity, and safest engine.", "available", False, False, False, _path_schema()),
@@ -42,7 +56,7 @@ TOOLS: tuple[ToolSpec, ...] = (
     ToolSpec("snapshot_workbook", "safety", "Create a structured workbook inventory or full cell/style snapshot through Excel.", "available", False, True, False, _path_schema()),
     ToolSpec("prepare_workbook", "safety", "Back up, verify, open read-only, and snapshot before any edit.", "available", False, True, False, _path_schema()),
     ToolSpec("pnl_update_a08", "recipe", "Run the guarded August P&L update recipe.", "available", True, True, True, _path_schema()),
-    ToolSpec("read_range", "cells", "Read values, formulas, and formats from a configured range.", "planned", False, True, False, {}),
+    ToolSpec("read_range", "cells", "Read values, formulas, and formats from an explicit range without changing the workbook.", "available", False, True, False, _read_range_schema(), risk="low", safe_for_dry_run=True),
     ToolSpec("write_range", "cells", "Bulk-write values to a configured range on a working copy.", "planned", True, True, True, {}),
     ToolSpec("set_formula", "cells", "Set one or more formulas on a working copy.", "planned", True, True, True, {}),
     ToolSpec("format_range", "formatting", "Apply fonts, fills, borders, alignment, and number formats.", "planned", True, True, True, {}),

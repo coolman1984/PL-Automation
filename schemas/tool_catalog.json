@@ -1,5 +1,5 @@
 {
-  "available_count": 6,
+  "available_count": 7,
   "schema_version": "1.0",
   "tool_count": 21,
   "tools": [
@@ -146,8 +146,37 @@
     },
     {
       "category": "cells",
-      "description": "Read values, formulas, and formats from a configured range.",
-      "input_schema": {},
+      "description": "Read values, formulas, and formats from an explicit range without changing the workbook.",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "address": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "file": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "mode": {
+            "enum": [
+              "auto",
+              "attach",
+              "open"
+            ]
+          },
+          "sheet": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "file",
+          "sheet",
+          "address"
+        ],
+        "type": "object"
+      },
       "mutates_workbook": false,
       "name": "read_range",
       "requires_approval": false,
@@ -155,7 +184,7 @@
       "requires_excel": true,
       "risk": "low",
       "safe_for_dry_run": true,
-      "status": "planned"
+      "status": "available"
     },
     {
       "category": "cells",

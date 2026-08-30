@@ -46,7 +46,7 @@ Already implemented and tested locally:
 - P&L A08 recipe, validation, reporting, and idempotency checks;
 - tool catalogue that distinguishes available and planned capabilities;
 - portable/offline build and repair scripts;
-- 79 passing tests and one Windows COM test intentionally gated.
+- 81 passing tests and one Windows COM test intentionally gated.
 
 Do not rewrite these components without a failing test or a documented design
 reason. Generalize them behind stable interfaces.

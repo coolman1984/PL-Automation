@@ -1,8 +1,8 @@
 # Project Status
 
 **Last updated:** 2026-08-30  
-**Milestone:** M1 — agent-ready foundation complete  
-**Overall state:** agent onboarding and contract foundation are implemented;
+**Milestone:** M2 — read-only Excel engine in progress  
+**Overall state:** agent onboarding and read-only foundation are implemented;
 production generic write tools are still locked
 
 ## Completed
@@ -21,6 +21,7 @@ production generic write tools are still locked
 - [x] Safe executor for declared probe/backup tools.
 - [x] Agent start, status, and tool-description commands.
 - [x] Generated catalogue plus catalogue schema.
+- [x] Read-only `read_range` contract and Excel COM adapter code.
 
 ## In progress
 
@@ -29,7 +30,8 @@ production generic write tools are still locked
 
 ## Planned and locked
 
-- [ ] General range read/write and formula tools.
+- [ ] General range write and formula tools (read-only range is implemented but
+  real Windows acceptance is pending).
 - [ ] Row/column and worksheet structure tools.
 - [ ] Formatting, tables, filters, validation, comments, and hyperlinks.
 - [ ] Charts, pivots, names, connections, shapes, and controlled refresh.
@@ -47,6 +49,6 @@ production generic write tools are still locked
 
 ## Next single task
 
-Implement the read-only Excel COM adapter and `read_range` tool, with a gated
-Windows integration test. Keep all mutation tools locked until the adapter can
-inspect exact targets and return JSON-safe evidence.
+Run the read-only `read_range` acceptance test on an authorized Windows Excel
+machine. After it passes, start the generic write transaction layer; keep all
+mutation tools locked until backup, rollback, and reopen-validation gates pass.

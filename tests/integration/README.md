@@ -18,6 +18,8 @@ The whole directory is skipped unless **all** of these hold:
 cd pl_actual_automation
 set PL_COM_TESTS=1
 set PL_COM_WORKBOOK=D:\full\path\to\★Final PL Statement S08 T09 V4(1).xlsb
+set PL_COM_READ_SHEET=Data
+set PL_COM_READ_ADDRESS=A1:C10
 .venv\Scripts\python -m pytest tests\integration -v
 
 rem full execution acceptance (approved disposable run only):

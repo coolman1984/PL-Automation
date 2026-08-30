@@ -28,7 +28,7 @@ def project_status(root: Path) -> dict[str, Any]:
     return {
         "schema_version": "1.0",
         "project": "PL Automation",
-        "milestone": "M1 — agent-ready foundation complete",
+        "milestone": "M2 — read-only Excel engine in progress",
         "available_tools": catalog["available_count"],
         "known_tools": catalog["tool_count"],
         "status_file": "docs/PROJECT_STATUS.md",

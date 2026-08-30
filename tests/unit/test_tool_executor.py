@@ -43,6 +43,25 @@ def test_planned_tool_is_never_executed():
     assert result.error.code == "tool_not_available"
 
 
+def test_read_range_uses_engine_contract_without_mutating():
+    engine = FakeEngine(
+        {"Data": {"1,1": "hello"}},
+        {"Data": {"1,1": "=\"hello\""}},
+    )
+    request = ToolRequest.new(
+        "read_range",
+        target=TargetRef("working-copy", sheet="Data", address="A1"),
+    )
+
+    result = execute_tool(request, engine=engine)
+
+    assert result.ok is True
+    assert result.changed is False
+    assert result.after_evidence["values"] == [["hello"]]
+    assert result.after_evidence["formulas"] == [['="hello"']]
+    assert not any(call[0].startswith("write") for call in engine.calls)
+
+
 def test_available_read_only_preparation_tools_have_safe_dry_run_handlers(tmp_path: Path):
     source = tmp_path / "sample.xlsb"
     source.write_bytes(b"not an excel file")
