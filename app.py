@@ -38,6 +38,10 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--month", type=int, default=None, help="Plan month number 1-12")
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--self-check", action="store_true", help="Check the local runtime and Excel installation")
+    mode.add_argument("--agent-start", action="store_true", help="Print the compact first-read guide for a coding agent")
+    mode.add_argument("--project-status", action="store_true", help="Print the current machine-readable project status")
+    mode.add_argument("--describe-tool", metavar="TOOL_NAME", help="Describe one declared agent tool")
+    mode.add_argument("--run-tool", metavar="REQUEST_JSON", help="Execute one declared JSON tool request file")
     mode.add_argument("--list-tools", action="store_true", help="Print the machine-readable Excel agent tool catalogue")
     mode.add_argument("--backup-only", action="store_true", help="Create and verify a byte-for-byte backup without opening Excel")
     mode.add_argument("--snapshot", action="store_true", help="Create a read-only workbook JSON snapshot through Excel")
@@ -55,6 +59,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--artifact-root", default="agent_artifacts", help="Backup and snapshot output folder")
     parser.add_argument("--snapshot-mode", choices=("auto", "inventory", "full"), default="auto")
     parser.add_argument("--max-snapshot-cells", type=int, default=250000)
+    parser.add_argument("--format", choices=("text", "json"), default="text", help="Output format for agent discovery commands")
     parser.add_argument("--verbose", action="store_true", help="Verbose console logging")
     return parser
 
@@ -63,11 +68,40 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
 
-    if args.list_tools:
+    if args.agent_start or args.project_status or args.describe_tool or args.list_tools:
+        from src.agent_entry import render_agent_start, render_project_status, render_tool_description
         from src.tool_registry import tool_catalog
 
-        print(json.dumps(tool_catalog(), ensure_ascii=False, indent=2))
+        json_output = args.format == "json"
+        if args.agent_start:
+            print(render_agent_start(application_root(), json_output=json_output), end="")
+        elif args.project_status:
+            print(render_project_status(application_root(), json_output=json_output), end="")
+        elif args.describe_tool:
+            print(render_tool_description(args.describe_tool, json_output=json_output), end="")
+        else:
+            if json_output:
+                print(json.dumps(tool_catalog(), ensure_ascii=False, indent=2))
+            else:
+                catalog = tool_catalog()
+                print("EXCEL AGENT TOOLS")
+                print(f"Available: {catalog['available_count']} / Known: {catalog['tool_count']}")
+                for item in catalog["tools"]:
+                    print(f"[{item['status'].upper()}] {item['name']} — {item['description']}")
         return 0
+
+    if args.run_tool:
+        from src.tool_executor import execute_tool
+
+        request_path = Path(args.run_tool).expanduser().resolve()
+        try:
+            request = json.loads(request_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            print(f"REQUEST ERROR: Could not read JSON tool request: {exc}")
+            return 2
+        result = execute_tool(request, project_root=application_root())
+        print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
+        return 0 if result.ok else 4
 
     if args.self_check:
         from src.runtime_check import render_runtime_check, run_runtime_check

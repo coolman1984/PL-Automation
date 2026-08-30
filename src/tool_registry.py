@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Any
 
 
@@ -16,6 +18,9 @@ class ToolSpec:
     requires_excel: bool
     requires_backup: bool
     input_schema: dict[str, Any]
+    risk: str = "low"
+    requires_approval: bool = False
+    safe_for_dry_run: bool = True
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -63,3 +68,24 @@ def tool_catalog(*, include_planned: bool = True) -> dict[str, Any]:
         "available_count": sum(item.status == "available" for item in selected),
         "tools": [item.to_dict() for item in selected],
     }
+
+
+def describe_tool(name: str) -> dict[str, Any] | None:
+    """Return one tool definition without exposing executable internals."""
+    for item in TOOLS:
+        if item.name == name:
+            return item.to_dict()
+    return None
+
+
+def write_catalog_json(path: Path, *, include_planned: bool = True) -> Path:
+    """Write the generated catalogue for agents and repository tooling."""
+    destination = Path(path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_suffix(destination.suffix + ".tmp")
+    with temporary.open("w", encoding="utf-8", newline="\n") as handle:
+        json.dump(tool_catalog(include_planned=include_planned), handle, ensure_ascii=False, indent=2, sort_keys=True)
+        handle.write("\n")
+        handle.flush()
+    temporary.replace(destination)
+    return destination

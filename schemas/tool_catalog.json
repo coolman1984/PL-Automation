@@ -1,0 +1,343 @@
+{
+  "available_count": 6,
+  "schema_version": "1.0",
+  "tool_count": 21,
+  "tools": [
+    {
+      "category": "system",
+      "description": "List every known tool and its readiness.",
+      "input_schema": {
+        "additionalProperties": false,
+        "type": "object"
+      },
+      "mutates_workbook": false,
+      "name": "list_tools",
+      "requires_approval": false,
+      "requires_backup": false,
+      "requires_excel": false,
+      "risk": "low",
+      "safe_for_dry_run": true,
+      "status": "available"
+    },
+    {
+      "category": "safety",
+      "description": "Detect the Excel container, protection, complexity, and safest engine.",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "file": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "type": "object"
+      },
+      "mutates_workbook": false,
+      "name": "inspect_file",
+      "requires_approval": false,
+      "requires_backup": false,
+      "requires_excel": false,
+      "risk": "low",
+      "safe_for_dry_run": true,
+      "status": "available"
+    },
+    {
+      "category": "safety",
+      "description": "Create and verify a byte-for-byte backup plus JSON evidence.",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "file": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "type": "object"
+      },
+      "mutates_workbook": false,
+      "name": "create_backup",
+      "requires_approval": false,
+      "requires_backup": false,
+      "requires_excel": false,
+      "risk": "low",
+      "safe_for_dry_run": true,
+      "status": "available"
+    },
+    {
+      "category": "safety",
+      "description": "Create a structured workbook inventory or full cell/style snapshot through Excel.",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "file": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "type": "object"
+      },
+      "mutates_workbook": false,
+      "name": "snapshot_workbook",
+      "requires_approval": false,
+      "requires_backup": false,
+      "requires_excel": true,
+      "risk": "low",
+      "safe_for_dry_run": true,
+      "status": "available"
+    },
+    {
+      "category": "safety",
+      "description": "Back up, verify, open read-only, and snapshot before any edit.",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "file": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "type": "object"
+      },
+      "mutates_workbook": false,
+      "name": "prepare_workbook",
+      "requires_approval": false,
+      "requires_backup": false,
+      "requires_excel": true,
+      "risk": "low",
+      "safe_for_dry_run": true,
+      "status": "available"
+    },
+    {
+      "category": "recipe",
+      "description": "Run the guarded August P&L update recipe.",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "file": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "type": "object"
+      },
+      "mutates_workbook": true,
+      "name": "pnl_update_a08",
+      "requires_approval": false,
+      "requires_backup": true,
+      "requires_excel": true,
+      "risk": "low",
+      "safe_for_dry_run": true,
+      "status": "available"
+    },
+    {
+      "category": "cells",
+      "description": "Read values, formulas, and formats from a configured range.",
+      "input_schema": {},
+      "mutates_workbook": false,
+      "name": "read_range",
+      "requires_approval": false,
+      "requires_backup": false,
+      "requires_excel": true,
+      "risk": "low",
+      "safe_for_dry_run": true,
+      "status": "planned"
+    },
+    {
+      "category": "cells",
+      "description": "Bulk-write values to a configured range on a working copy.",
+      "input_schema": {},
+      "mutates_workbook": true,
+      "name": "write_range",
+      "requires_approval": false,
+      "requires_backup": true,
+      "requires_excel": true,
+      "risk": "low",
+      "safe_for_dry_run": true,
+      "status": "planned"
+    },
+    {
+      "category": "cells",
+      "description": "Set one or more formulas on a working copy.",
+      "input_schema": {},
+      "mutates_workbook": true,
+      "name": "set_formula",
+      "requires_approval": false,
+      "requires_backup": true,
+      "requires_excel": true,
+      "risk": "low",
+      "safe_for_dry_run": true,
+      "status": "planned"
+    },
+    {
+      "category": "formatting",
+      "description": "Apply fonts, fills, borders, alignment, and number formats.",
+      "input_schema": {},
+      "mutates_workbook": true,
+      "name": "format_range",
+      "requires_approval": false,
+      "requires_backup": true,
+      "requires_excel": true,
+      "risk": "low",
+      "safe_for_dry_run": true,
+      "status": "planned"
+    },
+    {
+      "category": "cells",
+      "description": "Copy values, formulas, formats, or all content through Excel.",
+      "input_schema": {},
+      "mutates_workbook": true,
+      "name": "copy_range",
+      "requires_approval": false,
+      "requires_backup": true,
+      "requires_excel": true,
+      "risk": "low",
+      "safe_for_dry_run": true,
+      "status": "planned"
+    },
+    {
+      "category": "structure",
+      "description": "Insert rows while preserving neighboring workbook behavior.",
+      "input_schema": {},
+      "mutates_workbook": true,
+      "name": "insert_rows",
+      "requires_approval": false,
+      "requires_backup": true,
+      "requires_excel": true,
+      "risk": "low",
+      "safe_for_dry_run": true,
+      "status": "planned"
+    },
+    {
+      "category": "structure",
+      "description": "Insert columns while preserving neighboring workbook behavior.",
+      "input_schema": {},
+      "mutates_workbook": true,
+      "name": "insert_columns",
+      "requires_approval": false,
+      "requires_backup": true,
+      "requires_excel": true,
+      "risk": "low",
+      "safe_for_dry_run": true,
+      "status": "planned"
+    },
+    {
+      "category": "structure",
+      "description": "Create, rename, move, hide, or safely delete sheets.",
+      "input_schema": {},
+      "mutates_workbook": true,
+      "name": "manage_sheet",
+      "requires_approval": false,
+      "requires_backup": true,
+      "requires_excel": true,
+      "risk": "low",
+      "safe_for_dry_run": true,
+      "status": "planned"
+    },
+    {
+      "category": "objects",
+      "description": "Create, resize, or update an Excel table.",
+      "input_schema": {},
+      "mutates_workbook": true,
+      "name": "manage_table",
+      "requires_approval": false,
+      "requires_backup": true,
+      "requires_excel": true,
+      "risk": "low",
+      "safe_for_dry_run": true,
+      "status": "planned"
+    },
+    {
+      "category": "objects",
+      "description": "Create or modify a chart using Excel's object model.",
+      "input_schema": {},
+      "mutates_workbook": true,
+      "name": "manage_chart",
+      "requires_approval": false,
+      "requires_backup": true,
+      "requires_excel": true,
+      "risk": "low",
+      "safe_for_dry_run": true,
+      "status": "planned"
+    },
+    {
+      "category": "calculation",
+      "description": "Refresh approved connections in a controlled order.",
+      "input_schema": {},
+      "mutates_workbook": true,
+      "name": "refresh_workbook",
+      "requires_approval": false,
+      "requires_backup": true,
+      "requires_excel": true,
+      "risk": "low",
+      "safe_for_dry_run": true,
+      "status": "planned"
+    },
+    {
+      "category": "calculation",
+      "description": "Calculate and wait for Excel completion with a timeout.",
+      "input_schema": {},
+      "mutates_workbook": true,
+      "name": "calculate_workbook",
+      "requires_approval": false,
+      "requires_backup": true,
+      "requires_excel": true,
+      "risk": "low",
+      "safe_for_dry_run": true,
+      "status": "planned"
+    },
+    {
+      "category": "safety",
+      "description": "Compare required workbook facts and formulas before publication.",
+      "input_schema": {},
+      "mutates_workbook": false,
+      "name": "validate_workbook",
+      "requires_approval": false,
+      "requires_backup": true,
+      "requires_excel": true,
+      "risk": "low",
+      "safe_for_dry_run": true,
+      "status": "planned"
+    },
+    {
+      "category": "safety",
+      "description": "Atomically publish only a closed and validated working copy.",
+      "input_schema": {},
+      "mutates_workbook": false,
+      "name": "publish_workbook",
+      "requires_approval": false,
+      "requires_backup": true,
+      "requires_excel": false,
+      "risk": "low",
+      "safe_for_dry_run": true,
+      "status": "planned"
+    },
+    {
+      "category": "safety",
+      "description": "Restore a selected verified backup to a new recovery path.",
+      "input_schema": {},
+      "mutates_workbook": false,
+      "name": "restore_backup",
+      "requires_approval": false,
+      "requires_backup": false,
+      "requires_excel": false,
+      "risk": "low",
+      "safe_for_dry_run": true,
+      "status": "planned"
+    }
+  ]
+}

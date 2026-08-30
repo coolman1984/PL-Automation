@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/pl-automation/tool-catalog.schema.json",
+  "title": "Excel Agent Tool Catalog",
+  "type": "object",
+  "required": ["schema_version", "tool_count", "available_count", "tools"],
+  "properties": {
+    "schema_version": {"type": "string"},
+    "tool_count": {"type": "integer", "minimum": 0},
+    "available_count": {"type": "integer", "minimum": 0},
+    "tools": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "category", "description", "status", "mutates_workbook", "requires_excel", "requires_backup", "input_schema"],
+        "properties": {
+          "name": {"type": "string", "pattern": "^[a-z][a-z0-9_.-]*$"},
+          "category": {"type": "string"},
+          "description": {"type": "string"},
+          "status": {"enum": ["available", "planned", "deprecated", "blocked"]},
+          "mutates_workbook": {"type": "boolean"},
+          "requires_excel": {"type": "boolean"},
+          "requires_backup": {"type": "boolean"},
+          "risk": {"enum": ["none", "low", "medium", "high", "critical"]},
+          "requires_approval": {"type": "boolean"},
+          "safe_for_dry_run": {"type": "boolean"},
+          "input_schema": {"type": "object"}
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": false
+}

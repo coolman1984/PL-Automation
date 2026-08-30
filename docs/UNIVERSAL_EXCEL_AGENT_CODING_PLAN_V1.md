@@ -1,6 +1,6 @@
 # Universal Excel Agent — Coding Execution Plan V1
 
-**Status:** Approved direction; implementation not yet complete  
+**Status:** M1 complete; M2 in progress  
 **Target:** Windows 10/11 with desktop Microsoft Excel  
 **Primary runtime:** Private portable Python runtime  
 **Primary fidelity engine:** Microsoft Excel COM  
@@ -46,7 +46,7 @@ Already implemented and tested locally:
 - P&L A08 recipe, validation, reporting, and idempotency checks;
 - tool catalogue that distinguishes available and planned capabilities;
 - portable/offline build and repair scripts;
-- 59 passing tests and one Windows COM test intentionally gated.
+- 79 passing tests and one Windows COM test intentionally gated.
 
 Do not rewrite these components without a failing test or a documented design
 reason. Generalize them behind stable interfaces.
@@ -238,7 +238,7 @@ Exit gate:
 - fixtures contain no company data;
 - baseline behavior has reproducible evidence.
 
-### Phase 1 — Agent entry pack
+### Phase 1 — Agent entry pack — **COMPLETE**
 
 Create the six authoritative files in section 5. Generate the tool catalogue
 from Python metadata so documentation cannot drift from executable tools.
@@ -258,7 +258,7 @@ Exit gate:
   command, next milestone, and available tools by reading `AGENTS.md` only;
 - documentation link checker and catalogue consistency tests pass.
 
-### Phase 2 — Stable contracts and compatibility layer
+### Phase 2 — Stable contracts and compatibility layer — **IN PROGRESS**
 
 Create:
 
@@ -542,24 +542,20 @@ For each phase:
 Do not build all tools at once. Complete and unlock one coherent tool group at a
 time.
 
-## 14. Immediate next milestone
+## 14. Current milestone
 
-**Milestone M1 — Agent-ready foundation**
+**Milestone M2 — Read-only Excel engine foundation**
 
 Deliverables:
 
-- `AGENTS.md`;
-- `docs/START_HERE_AGENT.md`;
-- `docs/PROJECT_STATUS.md`;
-- `docs/FILE_MAP.md`;
-- generated `schemas/tool_catalog.json`;
-- tool request/result/error models;
-- fake engine and contract-test harness;
-- compatibility wrapper for existing backup, snapshot, probe, and P&L tools;
-- CLI commands from Phase 1.
+- `src/engines/excel_com.py` implementing the explicit-target engine contract;
+- `src/engines/router.py` implementing probe-to-engine selection;
+- read-only `read_range` behind the engine contract;
+- gated Windows integration coverage for a real Excel workbook;
+- no generic mutation tool unlocked until the read-only acceptance gate passes.
 
-M1 is complete only when a clean-session agent can answer these questions from
-the repository without searching the whole codebase:
+M1 is complete. A clean-session agent can answer these questions from the
+repository without searching the whole codebase:
 
 1. What is safe to run now?
 2. What is planned but locked?
@@ -578,4 +574,3 @@ the repository without searching the whole codebase:
 - Excel performance guidance: https://learn.microsoft.com/en-us/office/vba/excel/concepts/excel-performance/excel-tips-for-optimizing-performance-obstructions
 - openpyxl preservation warning: https://openpyxl.readthedocs.io/en/stable/tutorial.html
 - Python on Windows and embedded distribution: https://docs.python.org/3/using/windows.html
-
