@@ -65,6 +65,13 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Windows legacy consoles default to CP1252 and cannot print characters
+    # such as the star in the real workbook filename. Reconfigure to UTF-8 so
+    # CLI output never aborts a run. File access always uses the true path.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     parser = _build_parser()
     args = parser.parse_args(argv)
 

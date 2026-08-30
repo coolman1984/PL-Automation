@@ -20,6 +20,8 @@ XL_CELL_TYPE_FORMULAS = -4123
 XL_CELL_TYPE_CONSTANTS = 2
 XL_TO_RIGHT = -4161
 XL_FORMAT_FROM_LEFT_OR_ABOVE = 0
+XL_ERRORS = 16
+XL_DATABASE_SOURCE_TYPE = 1  # xlDatabase: a worksheet range or Excel Table source
 XL_EXCEL12 = 50
 # Office MsoAutomationSecurityForceDisable.  Set only on automation-owned
 # isolated Excel instances, never on the user's attached instance.

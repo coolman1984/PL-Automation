@@ -31,9 +31,9 @@ def test_backup_tool_dry_run_never_creates_backup(tmp_path: Path):
 
 def test_planned_tool_is_never_executed():
     request = ToolRequest.new(
-        "write_range",
+        "set_formula",
         target=TargetRef("working-copy", sheet="Data", address="A1"),
-        arguments={"values": [[1]]},
+        arguments={"formulas": [["=1"]]},
         dry_run=False,
     )
 

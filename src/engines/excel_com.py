@@ -8,10 +8,18 @@ initialization and lifecycle ownership.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from typing import Any
 
 from ..agent_contracts import TargetRef
+from ..constants import (
+    XL_CELL_TYPE_FORMULAS,
+    XL_DATABASE_SOURCE_TYPE,
+    XL_ERRORS,
+    XL_FORMAT_FROM_LEFT_OR_ABOVE,
+    XL_TO_RIGHT,
+)
 from ..engine_contract import EngineCapabilities
 
 
@@ -39,6 +47,31 @@ def _safe_int(value: Any, default: int = 0) -> int:
         return int(value)
     except (TypeError, ValueError, OverflowError):
         return default
+
+
+_R1C1_SOURCE_RE = re.compile(
+    r"^(?:'(?P<quoted_sheet>[^']+)'|(?P<sheet>[^!']+))!"
+    r"R(?P<r1>\d+)C(?P<c1>\d+)(?::R(?P<r2>\d+)C(?P<c2>\d+))?$"
+)
+
+
+def _parse_r1c1_source(source_data: str | None) -> tuple[str, int, int, int, int] | None:
+    """Parse Excel's canonical ``PivotCache.SourceData`` string.
+
+    Excel always reports this in ``Sheet!R#C#[:R#C#]`` form regardless of the
+    notation used when the source was set. Returns ``None`` if it cannot be
+    parsed (e.g. a table name or an external/non-range source).
+    """
+    if not source_data:
+        return None
+    match = _R1C1_SOURCE_RE.match(source_data.strip())
+    if not match:
+        return None
+    sheet = match.group("quoted_sheet") or match.group("sheet")
+    r1, c1 = int(match.group("r1")), int(match.group("c1"))
+    r2 = int(match.group("r2")) if match.group("r2") else r1
+    c2 = int(match.group("c2")) if match.group("c2") else c1
+    return (sheet, min(r1, r2), min(c1, c2), max(r1, r2), max(c1, c2))
 
 
 class ExcelComEngine:
@@ -193,6 +226,144 @@ class ExcelComEngine:
             return
         source_range.Copy()
         destination_range.PasteSpecial(Paste="formats")
+
+    def clear_range(self, target: TargetRef) -> None:
+        if self.read_only:
+            raise PermissionError("The Excel engine is read-only")
+        # ClearContents only: never Clear() (which would also drop formatting)
+        # and never a row/column delete.
+        self._resolve_target(target).ClearContents()
+
+    def resolve_bounds(self, target: TargetRef) -> tuple[int, int, int, int]:
+        cell_range = self._resolve_target(target)
+        first_row = _safe_int(cell_range.Row)
+        first_col = _safe_int(cell_range.Column)
+        last_row = first_row + _safe_int(cell_range.Rows.Count) - 1
+        last_col = first_col + _safe_int(cell_range.Columns.Count) - 1
+        return first_row, first_col, last_row, last_col
+
+    def fill_formula_down(self, template: TargetRef, target: TargetRef) -> None:
+        if self.read_only:
+            raise PermissionError("The Excel engine is read-only")
+        if template.sheet != target.sheet:
+            raise ValueError("The template and target ranges must be on the same sheet")
+        template_range = self._resolve_target(template)
+        target_range = self._resolve_target(target)
+        worksheet = self._worksheet(str(template.sheet))
+        # Excel's own FillDown propagates relative/absolute/structured
+        # references with true Excel semantics; the combined range's first
+        # row(s) are the source and are never themselves overwritten.
+        combined = worksheet.Range(template_range, target_range)
+        combined.FillDown()
+
+    def insert_columns(self, target: TargetRef, count: int) -> None:
+        if self.read_only:
+            raise PermissionError("The Excel engine is read-only")
+        anchor_range = self._resolve_target(target)
+        worksheet = self._worksheet(str(target.sheet))
+        insert_at_col = _safe_int(anchor_range.Column)
+        # pywin32's late-bound dynamic dispatch does not accept named keyword
+        # arguments such as Resize(ColumnSize=count), so span the exact
+        # entire-column range via Range(col1, col2) instead of Resize.
+        first_column = worksheet.Columns(insert_at_col)
+        last_column = worksheet.Columns(insert_at_col + count - 1)
+        insert_range = worksheet.Range(first_column, last_column)
+        insert_range.Insert(Shift=XL_TO_RIGHT, CopyOrigin=XL_FORMAT_FROM_LEFT_OR_ABOVE)
+
+    def count_formula_errors(self, sheet: str) -> int:
+        worksheet = self._worksheet(sheet)
+        try:
+            errors = worksheet.UsedRange.SpecialCells(XL_CELL_TYPE_FORMULAS, XL_ERRORS)
+            return _safe_int(errors.Count)
+        except Exception:
+            # SpecialCells raises when no matching cells exist.
+            return 0
+
+    def _resolve_pivot_table(self, sheet: str, name: str) -> object:
+        worksheet = self._worksheet(sheet)
+        try:
+            return worksheet.PivotTables(name)
+        except Exception as exc:
+            raise ValueError(f"PivotTable was not found: {sheet}!{name}") from exc
+
+    def _pivot_sharing(self, cache_index: int, sheet: str, name: str) -> list[str]:
+        sharing: list[str] = []
+        sheet_count = _safe_int(self.workbook.Worksheets.Count)
+        for sheet_index in range(1, sheet_count + 1):
+            other_sheet = self.workbook.Worksheets(sheet_index)
+            try:
+                pivot_count = _safe_int(other_sheet.PivotTables().Count)
+            except Exception:
+                pivot_count = 0
+            for pivot_index in range(1, pivot_count + 1):
+                other_pivot = other_sheet.PivotTables(pivot_index)
+                other_sheet_name = str(other_sheet.Name)
+                other_pivot_name = str(other_pivot.Name)
+                if other_sheet_name == sheet and other_pivot_name == name:
+                    continue
+                try:
+                    other_cache_index = _safe_int(other_pivot.CacheIndex)
+                except Exception:
+                    continue
+                if other_cache_index == cache_index:
+                    sharing.append(f"{other_sheet_name}!{other_pivot_name}")
+        return sharing
+
+    def inspect_pivot_table(self, sheet: str, name: str) -> dict[str, Any]:
+        pivot = self._resolve_pivot_table(sheet, name)
+        cache = pivot.PivotCache()
+        source_type_raw = _safe_int(getattr(cache, "SourceType", None), default=-1)
+        try:
+            source_data = str(cache.SourceData)
+        except Exception:
+            source_data = None
+        cache_index = _safe_int(getattr(pivot, "CacheIndex", None), default=-1)
+        return {
+            "name": str(pivot.Name),
+            "sheet": sheet,
+            "cache_index": cache_index,
+            "source_type": "database" if source_type_raw == XL_DATABASE_SOURCE_TYPE else source_type_raw,
+            "source_data": source_data,
+            # Excel always reports SourceData in R1C1 notation regardless of
+            # the notation used to set it, so callers must compare identity
+            # through resolve_source_bounds rather than the raw string.
+            "source_bounds": _parse_r1c1_source(source_data),
+            "shared_with": self._pivot_sharing(cache_index, sheet, name),
+        }
+
+    def resolve_source_bounds(self, address: str) -> tuple[str, int, int, int, int] | None:
+        """Resolve an address string to a canonical (sheet, first_row,
+        first_col, last_row, last_col) tuple, so it can be compared against
+        ``inspect_pivot_table``'s ``source_bounds`` regardless of notation.
+
+        Accepts either Excel's own R1C1 ``Sheet!R#C#[:R#C#]`` form (so a
+        caller can round-trip a value ``inspect_pivot_table`` just reported)
+        or an ordinary A1-style, optionally cross-sheet, address.
+        """
+        parsed = _parse_r1c1_source(address)
+        if parsed is not None:
+            return parsed
+        try:
+            resolved = self.workbook.Application.Range(address)
+        except Exception:
+            return None
+        first_row = _safe_int(resolved.Row)
+        first_col = _safe_int(resolved.Column)
+        last_row = first_row + _safe_int(resolved.Rows.Count) - 1
+        last_col = first_col + _safe_int(resolved.Columns.Count) - 1
+        return (str(resolved.Worksheet.Name), first_row, first_col, last_row, last_col)
+
+    def update_pivot_source(self, sheet: str, name: str, new_source_address: str) -> None:
+        if self.read_only:
+            raise PermissionError("The Excel engine is read-only")
+        pivot = self._resolve_pivot_table(sheet, name)
+        # Resolve to an actual Range first: PivotCaches().Create accepts a
+        # Range object for any notation, avoiding ambiguity in the raw string.
+        new_source_range = self.workbook.Application.Range(new_source_address)
+        new_cache = self.workbook.PivotCaches().Create(XL_DATABASE_SOURCE_TYPE, new_source_range)
+        pivot.ChangePivotCache(new_cache)
+        # A targeted refresh of only this PivotTable; never Application.RefreshAll.
+        pivot.RefreshTable()
 
     def close(self, *, save: bool = False) -> None:
         if self.session is not None:

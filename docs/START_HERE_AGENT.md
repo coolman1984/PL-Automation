@@ -12,7 +12,8 @@ structure, tables, charts, pivots, links, objects, and calculations.
 1. `AGENTS.md` — non-negotiable rules.
 2. `docs/PROJECT_STATUS.md` — what is actually complete today.
 3. `docs/FILE_MAP.md` — where each responsibility lives.
-4. `docs/UNIVERSAL_EXCEL_AGENT_CODING_PLAN_V1.md` — phase-by-phase plan.
+4. `docs/UNIVERSAL_EXCEL_AGENT_CODING_PLAN_V2.md` — current phase-by-phase plan.
+   V1 is retained as design history.
 5. `python app.py --list-tools --format json` — callable versus locked tools.
 6. `python app.py --run-tool REQUEST_JSON` — execute one declared request file.
 

@@ -1,7 +1,7 @@
 {
-  "available_count": 7,
+  "available_count": 13,
   "schema_version": "1.0",
-  "tool_count": 21,
+  "tool_count": 24,
   "tools": [
     {
       "category": "system",
@@ -188,8 +188,47 @@
     },
     {
       "category": "cells",
+      "description": "Clear cell contents only (never formatting, never rows/columns) from an exact bounded range on a working copy.",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_cell_count": {
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "expected_cell_count"
+        ],
+        "type": "object"
+      },
+      "mutates_workbook": true,
+      "name": "clear_range",
+      "requires_approval": false,
+      "requires_backup": true,
+      "requires_excel": true,
+      "risk": "low",
+      "safe_for_dry_run": true,
+      "status": "available"
+    },
+    {
+      "category": "cells",
       "description": "Bulk-write values to a configured range on a working copy.",
-      "input_schema": {},
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "values": {
+            "items": {
+              "type": "array"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "values"
+        ],
+        "type": "object"
+      },
       "mutates_workbook": true,
       "name": "write_range",
       "requires_approval": false,
@@ -197,7 +236,7 @@
       "requires_excel": true,
       "risk": "low",
       "safe_for_dry_run": true,
-      "status": "planned"
+      "status": "available"
     },
     {
       "category": "cells",
@@ -227,8 +266,44 @@
     },
     {
       "category": "cells",
-      "description": "Copy values, formulas, formats, or all content through Excel.",
-      "input_schema": {},
+      "description": "Copy values, formulas, formats, or all content through Excel within the same open workbook.",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "mode": {
+            "enum": [
+              "all",
+              "values",
+              "formulas",
+              "formats"
+            ]
+          },
+          "source": {
+            "properties": {
+              "address": {
+                "type": "string"
+              },
+              "object_name": {
+                "type": "string"
+              },
+              "sheet": {
+                "type": "string"
+              },
+              "workbook_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "workbook_id"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "source"
+        ],
+        "type": "object"
+      },
       "mutates_workbook": true,
       "name": "copy_range",
       "requires_approval": false,
@@ -236,7 +311,58 @@
       "requires_excel": true,
       "risk": "low",
       "safe_for_dry_run": true,
-      "status": "planned"
+      "status": "available"
+    },
+    {
+      "category": "cells",
+      "description": "Propagate a single-row formula template down through an exact, contiguous, same-column target row range using Excel's own fill semantics.",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_target_row_count": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "expected_template_formulas": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "template": {
+            "properties": {
+              "address": {
+                "type": "string"
+              },
+              "sheet": {
+                "type": "string"
+              },
+              "workbook_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "workbook_id"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "template",
+          "expected_template_formulas",
+          "expected_target_row_count"
+        ],
+        "type": "object"
+      },
+      "mutates_workbook": true,
+      "name": "fill_formula_down",
+      "requires_approval": false,
+      "requires_backup": true,
+      "requires_excel": true,
+      "risk": "low",
+      "safe_for_dry_run": true,
+      "status": "available"
     },
     {
       "category": "structure",
@@ -253,16 +379,33 @@
     },
     {
       "category": "structure",
-      "description": "Insert columns while preserving neighboring workbook behavior.",
-      "input_schema": {},
+      "description": "Insert an exact column count at an exact anchor on a working copy, inheriting neighboring formatting through Excel's own insert semantics.",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "expected_anchor_column": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "count",
+          "expected_anchor_column"
+        ],
+        "type": "object"
+      },
       "mutates_workbook": true,
       "name": "insert_columns",
       "requires_approval": false,
       "requires_backup": true,
       "requires_excel": true,
-      "risk": "low",
+      "risk": "medium",
       "safe_for_dry_run": true,
-      "status": "planned"
+      "status": "available"
     },
     {
       "category": "structure",
@@ -289,6 +432,39 @@
       "risk": "low",
       "safe_for_dry_run": true,
       "status": "planned"
+    },
+    {
+      "category": "objects",
+      "description": "Change one named PivotTable's worksheet/table source and perform a targeted refresh (never RefreshAll). External and Data Model sources stay locked.",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "allow_shared_cache_replacement": {
+            "type": "boolean"
+          },
+          "expected_current_source": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "new_source": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "expected_current_source",
+          "new_source"
+        ],
+        "type": "object"
+      },
+      "mutates_workbook": true,
+      "name": "update_pivot_source",
+      "requires_approval": false,
+      "requires_backup": true,
+      "requires_excel": true,
+      "risk": "medium",
+      "safe_for_dry_run": true,
+      "status": "available"
     },
     {
       "category": "objects",

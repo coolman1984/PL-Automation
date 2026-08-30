@@ -316,7 +316,12 @@ def update_total_pl(
     )
     insert_at = total_block.insert_at_col
     try:
-        total_sheet.Columns(int(insert_at)).Resize(ColumnSize=2).Insert(
+        # pywin32's late-bound dynamic dispatch does not accept named keyword
+        # arguments such as Resize(ColumnSize=2); span the exact two-column
+        # entire-column range via Range(col1, col2) instead.
+        first_column = total_sheet.Columns(int(insert_at))
+        second_column = total_sheet.Columns(int(insert_at) + 1)
+        total_sheet.Range(first_column, second_column).Insert(
             Shift=-4161, CopyOrigin=0
         )
     except Exception as exc:  # pragma: no cover - requires Excel

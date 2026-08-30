@@ -17,7 +17,6 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from .block_locator import (
-    candidate_has_business_lineage,
     detect_existing_actual,
     find_month_block_candidates,
     select_unique_month_block,
@@ -66,7 +65,7 @@ from .reporting import (
     write_manifest_atomic,
     write_run_report,
 )
-from .total_pl_updater import update_total_pl
+from .total_pl_updater import candidate_has_business_lineage, update_total_pl
 from .validation import (
     reconcile_total_pl_at_column,
     validate_business_formulas,

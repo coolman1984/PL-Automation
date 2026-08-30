@@ -18,6 +18,11 @@ from .file_probe import probe_excel_file
 from .tool_registry import tool_catalog
 from .file_probe import resolve_com_mode
 
+# No chunking is implemented yet (V2 plan section 8: "Add configurable
+# chunking only after measuring the real payload"). This bounds a single
+# bulk range operation instead of silently attempting an unbounded one.
+_MAX_CELLS_PER_RANGE_OPERATION = 200_000
+
 
 def _error(tool: str, code: str, message: str, *, recoverable: bool = True, action: str | None = None, details: Mapping[str, Any] | None = None) -> ToolResult:
     return ToolResult.failure(
@@ -50,6 +55,14 @@ def _target_label(target: TargetRef | None) -> str:
         return ""
     pieces = [target.sheet, target.address, target.object_name]
     return "!".join(item for item in pieces if item)
+
+
+def _column_letter(number: int) -> str:
+    letters = ""
+    while number > 0:
+        number, remainder = divmod(number - 1, 26)
+        letters = chr(65 + remainder) + letters
+    return letters
 
 
 def _shape(values: Any) -> tuple[int, int] | None:
@@ -347,6 +360,320 @@ def execute_tool(
     if target_error is not None:
         return target_error
 
+    if tool == "clear_range":
+        if normalized.target.workbook_id not in {"working-copy", ""}:  # type: ignore[union-attr]
+            return _error(
+                tool,
+                "invalid_target_workbook",
+                "clear_range may only target the Excel-created working copy, not the source.",
+                action="Resolve a working-copy target through the coordinator's transaction.",
+            )
+        if engine is None:
+            return _error(tool, "engine_required", "No workbook engine was attached to this request.", action="Select and open a compatible engine before range operations.")
+        expected_cell_count = normalized.arguments.get("expected_cell_count")
+        if not isinstance(expected_cell_count, int) or isinstance(expected_cell_count, bool) or expected_cell_count < 1:
+            return _error(tool, "expected_cell_count_required", "arguments.expected_cell_count must name the exact positive number of cells being cleared.")
+        try:
+            before_values = engine.read_values(normalized.target)
+        except Exception as exc:
+            return _error(tool, "before_fingerprint_failed", str(exc), details={"target": normalized.target.to_dict()})
+        actual_cell_count = sum(len(row) for row in before_values)
+        if actual_cell_count != expected_cell_count:
+            return _error(
+                tool,
+                "cell_count_mismatch",
+                f"Resolved range has {actual_cell_count} cell(s) but expected_cell_count={expected_cell_count}.",
+                details={"actual_cell_count": actual_cell_count, "expected_cell_count": expected_cell_count},
+                action="Recompute the exact expected cell count for this range before retrying.",
+            )
+        if normalized.dry_run:
+            return ToolResult.success(
+                tool,
+                affected_ranges=(_target_label(normalized.target),),
+                warnings=("Dry run: no cells were cleared.",),
+                before_evidence={"values": before_values},
+                after_evidence={"would_clear_cell_count": actual_cell_count},
+                metrics=ToolMetrics(elapsed_ms=round((time.perf_counter() - started) * 1000)),
+            )
+        try:
+            engine.clear_range(normalized.target)
+        except Exception as exc:
+            return _error(tool, "engine_operation_failed", str(exc), details={"target": normalized.target.to_dict()})
+        return ToolResult.success(
+            tool,
+            changed=True,
+            affected_ranges=(_target_label(normalized.target),),
+            before_evidence={"values": before_values},
+            after_evidence={"cleared_cell_count": actual_cell_count},
+            metrics=ToolMetrics(elapsed_ms=round((time.perf_counter() - started) * 1000), cells_touched=actual_cell_count),
+        )
+
+    if tool == "fill_formula_down":
+        if normalized.target.workbook_id not in {"working-copy", ""}:  # type: ignore[union-attr]
+            return _error(
+                tool,
+                "invalid_target_workbook",
+                "fill_formula_down may only target the Excel-created working copy, not the source.",
+            )
+        if engine is None:
+            return _error(tool, "engine_required", "No workbook engine was attached to this request.", action="Select and open a compatible engine before range operations.")
+        template_data = normalized.arguments.get("template")
+        if not isinstance(template_data, Mapping):
+            return _error(tool, "template_required", "fill_formula_down needs an explicit template target naming the single-row formula source.")
+        template_target = TargetRef.from_dict(template_data)
+        if template_target.sheet != normalized.target.sheet:
+            return _error(tool, "template_target_sheet_mismatch", "The template and target ranges must be on the same sheet.")
+        expected_formulas = normalized.arguments.get("expected_template_formulas")
+        if not isinstance(expected_formulas, list) or not expected_formulas or not all(isinstance(item, str) for item in expected_formulas):
+            return _error(tool, "expected_template_formulas_required", "arguments.expected_template_formulas must be a non-empty list of exact formula strings.")
+        expected_row_count = normalized.arguments.get("expected_target_row_count")
+        if not isinstance(expected_row_count, int) or isinstance(expected_row_count, bool) or expected_row_count < 1:
+            return _error(tool, "expected_target_row_count_required", "arguments.expected_target_row_count must be a positive integer.")
+
+        try:
+            t_first_row, t_first_col, t_last_row, t_last_col = engine.resolve_bounds(template_target)
+            d_first_row, d_first_col, d_last_row, d_last_col = engine.resolve_bounds(normalized.target)
+        except Exception as exc:
+            return _error(tool, "range_resolution_failed", str(exc))
+
+        if t_first_row != t_last_row:
+            return _error(tool, "template_must_be_one_row", "The formula template must be exactly one row.")
+        if (t_first_col, t_last_col) != (d_first_col, d_last_col):
+            return _error(tool, "column_mismatch", "The template and target ranges must span the exact same columns.")
+        if d_first_row != t_first_row + 1:
+            return _error(
+                tool,
+                "not_contiguous",
+                f"The target range must start immediately below the template row (expected row {t_first_row + 1}, got {d_first_row}).",
+            )
+        actual_row_count = d_last_row - d_first_row + 1
+        if actual_row_count != expected_row_count:
+            return _error(
+                tool,
+                "row_count_mismatch",
+                f"Target range has {actual_row_count} row(s) but expected_target_row_count={expected_row_count}.",
+                details={"actual_row_count": actual_row_count, "expected_row_count": expected_row_count},
+            )
+
+        try:
+            actual_template_formulas = list(engine.read_formulas(template_target)[0])
+        except Exception as exc:
+            return _error(tool, "template_read_failed", str(exc))
+        if actual_template_formulas != expected_formulas:
+            return _error(
+                tool,
+                "template_fingerprint_mismatch",
+                "The template row's actual formulas do not match expected_template_formulas.",
+                details={"expected": expected_formulas, "actual": actual_template_formulas},
+                action="Read the template row first and pass back its exact current formulas.",
+            )
+
+        try:
+            before_values = engine.read_values(normalized.target)
+            before_formulas = engine.read_formulas(normalized.target)
+        except Exception as exc:
+            return _error(tool, "before_fingerprint_failed", str(exc))
+
+        if normalized.dry_run:
+            return ToolResult.success(
+                tool,
+                affected_ranges=(_target_label(normalized.target),),
+                warnings=("Dry run: no formulas were filled.",),
+                before_evidence={"values": before_values, "formulas": before_formulas},
+                after_evidence={"would_fill_row_count": actual_row_count},
+            )
+
+        try:
+            engine.fill_formula_down(template_target, normalized.target)
+        except Exception as exc:
+            return _error(tool, "engine_operation_failed", str(exc))
+
+        # Defense in depth: FillDown must never overwrite its own source row.
+        try:
+            template_after = list(engine.read_formulas(template_target)[0])
+        except Exception:
+            template_after = None
+        if template_after is not None and template_after != expected_formulas:
+            return _error(
+                tool,
+                "template_row_was_modified",
+                "The fill operation unexpectedly changed the template row; the working copy may be inconsistent.",
+                recoverable=False,
+            )
+
+        return ToolResult.success(
+            tool,
+            changed=True,
+            affected_ranges=(_target_label(normalized.target),),
+            before_evidence={"values": before_values, "formulas": before_formulas},
+            after_evidence={"filled_row_count": actual_row_count},
+            metrics=ToolMetrics(
+                elapsed_ms=round((time.perf_counter() - started) * 1000),
+                cells_touched=actual_row_count * (d_last_col - d_first_col + 1),
+            ),
+        )
+
+    if tool == "insert_columns":
+        if normalized.target.workbook_id not in {"working-copy", ""}:  # type: ignore[union-attr]
+            return _error(
+                tool,
+                "invalid_target_workbook",
+                "insert_columns may only target the Excel-created working copy, not the source.",
+            )
+        if engine is None:
+            return _error(tool, "engine_required", "No workbook engine was attached to this request.", action="Select and open a compatible engine before range operations.")
+        count = normalized.arguments.get("count")
+        if not isinstance(count, int) or isinstance(count, bool) or count < 1:
+            return _error(tool, "count_required", "arguments.count must be a positive integer.")
+        expected_anchor = normalized.arguments.get("expected_anchor_column")
+        if not isinstance(expected_anchor, str) or not expected_anchor.strip():
+            return _error(tool, "expected_anchor_column_required", "arguments.expected_anchor_column must name the exact column letter (e.g. 'D').")
+        try:
+            _, actual_anchor_col, _, _ = engine.resolve_bounds(normalized.target)
+        except Exception as exc:
+            return _error(tool, "range_resolution_failed", str(exc))
+        actual_anchor_letter = _column_letter(actual_anchor_col)
+        if actual_anchor_letter != expected_anchor.strip().upper():
+            return _error(
+                tool,
+                "anchor_column_mismatch",
+                f"Resolved anchor column is {actual_anchor_letter} but expected_anchor_column={expected_anchor!r}.",
+                details={"actual": actual_anchor_letter, "expected": expected_anchor},
+                action="Recompute the exact expected anchor column before retrying.",
+            )
+        try:
+            errors_before = engine.count_formula_errors(str(normalized.target.sheet))
+        except Exception as exc:
+            return _error(tool, "before_fingerprint_failed", str(exc))
+        if normalized.dry_run:
+            return ToolResult.success(
+                tool,
+                affected_ranges=(_target_label(normalized.target),),
+                warnings=("Dry run: no columns were inserted.",),
+                before_evidence={"formula_error_count": errors_before},
+                after_evidence={"would_insert_count": count, "anchor_column": actual_anchor_letter},
+            )
+        try:
+            engine.insert_columns(normalized.target, count)
+        except Exception as exc:
+            return _error(tool, "engine_operation_failed", str(exc))
+        try:
+            errors_after = engine.count_formula_errors(str(normalized.target.sheet))
+        except Exception as exc:
+            return _error(tool, "after_fingerprint_failed", str(exc))
+        if errors_after > errors_before:
+            return _error(
+                tool,
+                "reference_errors_introduced",
+                f"Column insertion introduced {errors_after - errors_before} new formula error cell(s) on {normalized.target.sheet}.",
+                details={"errors_before": errors_before, "errors_after": errors_after},
+                recoverable=False,
+            )
+        return ToolResult.success(
+            tool,
+            changed=True,
+            affected_ranges=(_target_label(normalized.target),),
+            before_evidence={"formula_error_count": errors_before},
+            after_evidence={"inserted_count": count, "anchor_column": actual_anchor_letter, "formula_error_count": errors_after},
+            metrics=ToolMetrics(elapsed_ms=round((time.perf_counter() - started) * 1000)),
+        )
+
+    if tool == "update_pivot_source":
+        if normalized.target.workbook_id not in {"working-copy", ""}:  # type: ignore[union-attr]
+            return _error(
+                tool,
+                "invalid_target_workbook",
+                "update_pivot_source may only target the Excel-created working copy, not the source.",
+            )
+        if not normalized.target.sheet or not normalized.target.object_name:  # type: ignore[union-attr]
+            return _error(tool, "pivot_target_required", "update_pivot_source needs target.sheet and target.object_name naming the exact PivotTable.")
+        if engine is None:
+            return _error(tool, "engine_required", "No workbook engine was attached to this request.", action="Select and open a compatible engine before range operations.")
+        expected_current_source = normalized.arguments.get("expected_current_source")
+        if not isinstance(expected_current_source, str) or not expected_current_source.strip():
+            return _error(tool, "expected_current_source_required", "arguments.expected_current_source must name the exact current source you have already inspected.")
+        new_source = normalized.arguments.get("new_source")
+        if not isinstance(new_source, str) or not new_source.strip():
+            return _error(tool, "new_source_required", "arguments.new_source must name the exact new worksheet/table source.")
+        allow_shared = bool(normalized.arguments.get("allow_shared_cache_replacement", False))
+
+        sheet = normalized.target.sheet
+        pivot_name = normalized.target.object_name
+        try:
+            info = engine.inspect_pivot_table(sheet, pivot_name)
+        except Exception as exc:
+            return _error(tool, "pivot_table_not_found", str(exc))
+
+        if info.get("source_type") != "database":
+            return _error(
+                tool,
+                "unsupported_pivot_source",
+                f"PivotTable source type {info.get('source_type')!r} is not a worksheet/table source; "
+                "external and Data Model sources are locked as unsupported.",
+                recoverable=False,
+            )
+        try:
+            expected_bounds = engine.resolve_source_bounds(expected_current_source)
+        except Exception as exc:
+            return _error(tool, "expected_current_source_unresolvable", str(exc))
+        if info.get("source_bounds") != expected_bounds:
+            return _error(
+                tool,
+                "current_source_mismatch",
+                f"Actual current source {info.get('source_data')!r} does not match "
+                f"expected_current_source={expected_current_source!r}.",
+                details={"actual": info.get("source_data"), "expected": expected_current_source},
+            )
+        shared_with = info.get("shared_with") or []
+        if shared_with and not allow_shared:
+            return _error(
+                tool,
+                "shared_cache_not_acknowledged",
+                f"This PivotTable's cache is shared with {shared_with}; changing it would also change "
+                "those PivotTables. Set arguments.allow_shared_cache_replacement=true to proceed.",
+                details={"shared_with": shared_with},
+            )
+
+        if normalized.dry_run:
+            return ToolResult.success(
+                tool,
+                affected_ranges=(_target_label(normalized.target),),
+                warnings=("Dry run: no PivotTable source was changed.",),
+                before_evidence=info,
+                after_evidence={"would_set_source": new_source},
+            )
+
+        try:
+            engine.update_pivot_source(sheet, pivot_name, new_source)
+        except Exception as exc:
+            return _error(tool, "engine_operation_failed", str(exc))
+
+        try:
+            after_info = engine.inspect_pivot_table(sheet, pivot_name)
+        except Exception as exc:
+            return _error(tool, "after_fingerprint_failed", str(exc))
+        try:
+            new_bounds = engine.resolve_source_bounds(new_source)
+        except Exception as exc:
+            return _error(tool, "new_source_unresolvable", str(exc))
+        if after_info.get("source_bounds") != new_bounds:
+            return _error(
+                tool,
+                "source_update_did_not_apply",
+                "The PivotTable source does not reflect the requested change after refresh.",
+                details={"actual": after_info.get("source_data"), "expected": new_source},
+                recoverable=False,
+            )
+
+        return ToolResult.success(
+            tool,
+            changed=True,
+            affected_ranges=(_target_label(normalized.target),),
+            before_evidence=info,
+            after_evidence=after_info,
+            metrics=ToolMetrics(elapsed_ms=round((time.perf_counter() - started) * 1000)),
+        )
+
     if tool in {"read_range", "write_range", "set_formula", "copy_range"}:
         if engine is None:
             return _error(tool, "engine_required", "No workbook engine was attached to this request.", action="Select and open a compatible engine before range operations.")
@@ -366,23 +693,96 @@ def execute_tool(
                     return _error(tool, "source_required", "copy_range needs an explicit source target.")
                 source_target = TargetRef.from_dict(source)
                 mode = str(normalized.arguments.get("mode", "all"))
+                if source_target.workbook_id not in {"working-copy", "source", ""}:
+                    return _error(
+                        tool,
+                        "cross_workbook_copy_unsupported",
+                        "copy_range only supports a source range already open in the same "
+                        "engine session; cross-workbook copies are not yet released.",
+                        action="Read the other workbook's range first, then write_range the values into this workbook.",
+                    )
+                try:
+                    source_values = engine.read_values(source_target)
+                except Exception as exc:
+                    return _error(tool, "source_read_failed", str(exc), details={"source": source_target.to_dict()})
+                source_shape = _shape(source_values)
+                try:
+                    dest_before_values = engine.read_values(normalized.target)
+                except Exception as exc:
+                    return _error(tool, "before_fingerprint_failed", str(exc), details={"target": normalized.target.to_dict()})
+                dest_shape = _shape(dest_before_values)
+                if source_shape is None or dest_shape is None or source_shape != dest_shape:
+                    return _error(
+                        tool,
+                        "shape_mismatch",
+                        f"Source range shape {source_shape} does not match destination range shape {dest_shape}.",
+                        details={"source_shape": source_shape, "destination_shape": dest_shape},
+                    )
+                cell_count = source_shape[0] * source_shape[1]
+                if cell_count > _MAX_CELLS_PER_RANGE_OPERATION:
+                    return _error(
+                        tool,
+                        "range_too_large",
+                        f"{cell_count} cells exceeds the current chunking-free limit of {_MAX_CELLS_PER_RANGE_OPERATION}.",
+                        details={"cell_count": cell_count, "limit": _MAX_CELLS_PER_RANGE_OPERATION},
+                        action="Split the range into smaller bounded operations.",
+                    )
                 if normalized.dry_run:
-                    return ToolResult.success(tool, warnings=("Dry run: no range was copied.",), affected_ranges=(_target_label(normalized.target),))
+                    return ToolResult.success(
+                        tool,
+                        affected_ranges=(_target_label(normalized.target),),
+                        warnings=("Dry run: no range was copied.",),
+                        before_evidence={"values": dest_before_values},
+                        after_evidence={"would_copy_cell_count": cell_count, "mode": mode},
+                    )
                 engine.copy_range(source_target, normalized.target, mode=mode)
-                return ToolResult.success(tool, changed=True, affected_ranges=(_target_label(normalized.target),), metrics=ToolMetrics(elapsed_ms=round((time.perf_counter() - started) * 1000)))
+                return ToolResult.success(
+                    tool,
+                    changed=True,
+                    affected_ranges=(_target_label(normalized.target),),
+                    before_evidence={"values": dest_before_values},
+                    after_evidence={"copied_cell_count": cell_count, "mode": mode},
+                    metrics=ToolMetrics(elapsed_ms=round((time.perf_counter() - started) * 1000), cells_touched=cell_count),
+                )
 
             argument_name = "values" if tool == "write_range" else "formulas"
             payload = normalized.arguments.get(argument_name)
             shape = _shape(payload)
             if shape is None:
                 return _error(tool, "invalid_matrix", f"arguments.{argument_name} must be a rectangular two-dimensional array.")
+            cell_count = shape[0] * shape[1]
+            if cell_count > _MAX_CELLS_PER_RANGE_OPERATION:
+                return _error(
+                    tool,
+                    "range_too_large",
+                    f"{cell_count} cells exceeds the current chunking-free limit of {_MAX_CELLS_PER_RANGE_OPERATION}.",
+                    details={"cell_count": cell_count, "limit": _MAX_CELLS_PER_RANGE_OPERATION},
+                    action="Split the range into smaller bounded operations.",
+                )
+            try:
+                before_values = engine.read_values(normalized.target) if tool == "write_range" else engine.read_formulas(normalized.target)
+            except Exception as exc:
+                return _error(tool, "before_fingerprint_failed", str(exc), details={"target": normalized.target.to_dict()})
             if normalized.dry_run:
-                return ToolResult.success(tool, affected_ranges=(_target_label(normalized.target),), warnings=("Dry run: workbook was not changed.",), after_evidence={"shape": {"rows": shape[0], "columns": shape[1]}})
+                return ToolResult.success(
+                    tool,
+                    affected_ranges=(_target_label(normalized.target),),
+                    warnings=("Dry run: workbook was not changed.",),
+                    before_evidence={argument_name: before_values},
+                    after_evidence={"shape": {"rows": shape[0], "columns": shape[1]}},
+                )
             if tool == "write_range":
                 engine.write_values(normalized.target, payload)
             else:
                 engine.write_formulas(normalized.target, payload)
-            return ToolResult.success(tool, changed=True, affected_ranges=(_target_label(normalized.target),), after_evidence={"shape": {"rows": shape[0], "columns": shape[1]}}, metrics=ToolMetrics(elapsed_ms=round((time.perf_counter() - started) * 1000), cells_touched=shape[0] * shape[1]))
+            return ToolResult.success(
+                tool,
+                changed=True,
+                affected_ranges=(_target_label(normalized.target),),
+                before_evidence={argument_name: before_values},
+                after_evidence={"shape": {"rows": shape[0], "columns": shape[1]}},
+                metrics=ToolMetrics(elapsed_ms=round((time.perf_counter() - started) * 1000), cells_touched=cell_count),
+            )
         except Exception as exc:
             return _error(tool, "engine_operation_failed", str(exc), details={"target": normalized.target.to_dict() if normalized.target else {}})
 

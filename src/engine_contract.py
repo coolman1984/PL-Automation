@@ -58,5 +58,36 @@ class WorkbookEngine(Protocol):
 
     def copy_range(self, source: TargetRef, destination: TargetRef, *, mode: str) -> None: ...
 
+    def clear_range(self, target: TargetRef) -> None: ...
+
+    def resolve_bounds(self, target: TargetRef) -> tuple[int, int, int, int]:
+        """Return (first_row, first_col, last_row, last_col), 1-based."""
+        ...
+
+    def fill_formula_down(self, template: TargetRef, target: TargetRef) -> None: ...
+
+    def insert_columns(self, target: TargetRef, count: int) -> None: ...
+
+    def count_formula_errors(self, sheet: str) -> int:
+        """Count cells whose formula currently evaluates to an Excel error."""
+        ...
+
+    def inspect_pivot_table(self, sheet: str, name: str) -> dict[str, Any]:
+        """Structural facts about one named PivotTable; never a COM object."""
+        ...
+
+    def resolve_source_bounds(self, address: str) -> Any:
+        """An opaque, comparable identity for a source address string.
+
+        Must be directly comparable (``==``) with the ``source_bounds`` value
+        returned by :meth:`inspect_pivot_table`, regardless of which address
+        notation the caller used.
+        """
+        ...
+
+    def update_pivot_source(self, sheet: str, name: str, new_source_address: str) -> None:
+        """Change one PivotTable's source and perform a targeted refresh."""
+        ...
+
     def close(self, *, save: bool = False) -> None: ...
 

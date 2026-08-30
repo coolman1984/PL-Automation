@@ -48,10 +48,15 @@ class FakeEngine:
 
     values: dict[str, dict[str, list[list[Any]]]]
     formulas: dict[str, dict[str, list[list[Any]]]] | None = None
+    pivot_tables: dict[str, dict[str, Any]] | None = None
+    """Keyed by ``"Sheet!PivotName"``; each value has at least
+    ``source_type`` ("database" or something else), ``source_data``, and
+    ``shared_with`` (a list of other ``"Sheet!Name"`` strings)."""
 
     def __post_init__(self) -> None:
         self.values = copy.deepcopy(self.values)
         self.formulas = copy.deepcopy(self.formulas or {})
+        self.pivot_tables = copy.deepcopy(self.pivot_tables or {})
         self.calls: list[tuple[str, str]] = []
 
     @property
@@ -119,6 +124,87 @@ class FakeEngine:
             raise ValueError("Fake engine supports values or formulas copy only")
         store = self.values if mode == "values" else self.formulas
         self._write(store, destination, self._read(store, source))
+
+    def clear_range(self, target: TargetRef) -> None:
+        self.calls.append(("clear_range", target.address or ""))
+        sheet = self._sheet(target)
+        if not target.address:
+            raise ValueError("An address is required for the fake engine")
+        first_row, first_col, last_row, last_col = _address(target.address)
+        destination = self.values.setdefault(sheet, {})
+        for row in range(first_row, last_row + 1):
+            for column in range(first_col, last_col + 1):
+                destination.pop(f"{row},{column}", None)
+
+    def resolve_bounds(self, target: TargetRef) -> tuple[int, int, int, int]:
+        self._sheet(target)
+        if not target.address:
+            raise ValueError("An address is required for the fake engine")
+        return _address(target.address)
+
+    def fill_formula_down(self, template: TargetRef, target: TargetRef) -> None:
+        """Copy the template row's formula strings verbatim into every target
+        row. This fake does not simulate Excel's relative-reference row
+        shifting; real fidelity is proven only against real Excel COM."""
+        self.calls.append(("fill_formula_down", target.address or ""))
+        template_formulas = self._read(self.formulas, template)[0]
+        target_first_row, target_first_col, target_last_row, target_last_col = self.resolve_bounds(target)
+        if (target_last_col - target_first_col + 1) != len(template_formulas):
+            raise ValueError("Template/target column count mismatch")
+        sheet = self._sheet(target)
+        destination = self.formulas.setdefault(sheet, {})
+        for row in range(target_first_row, target_last_row + 1):
+            for offset, formula in enumerate(template_formulas):
+                destination[f"{row},{target_first_col + offset}"] = formula
+
+    def insert_columns(self, target: TargetRef, count: int) -> None:
+        """Shift this sheet's own cell keys right of the anchor by ``count``.
+
+        Does not simulate Excel's cross-sheet or cross-workbook reference
+        rewriting; real fidelity is proven only against real Excel COM.
+        """
+        self.calls.append(("insert_columns", target.address or ""))
+        sheet = self._sheet(target)
+        _, insert_at_col, _, _ = self.resolve_bounds(target)
+        for store in (self.values, self.formulas):
+            sheet_store = store.get(sheet)
+            if not sheet_store:
+                continue
+            shifted: dict[str, Any] = {}
+            for key, value in sheet_store.items():
+                row_str, col_str = key.split(",")
+                row, col = int(row_str), int(col_str)
+                new_col = col + count if col >= insert_at_col else col
+                shifted[f"{row},{new_col}"] = value
+            store[sheet] = shifted
+
+    def count_formula_errors(self, sheet: str) -> int:
+        """Always zero: this fake never recomputes or introduces real errors."""
+        if sheet not in self.values:
+            raise KeyError(f"Sheet not found: {sheet}")
+        return 0
+
+    def inspect_pivot_table(self, sheet: str, name: str) -> dict[str, Any]:
+        key = f"{sheet}!{name}"
+        if key not in self.pivot_tables:
+            raise KeyError(f"PivotTable not found: {key}")
+        info = copy.deepcopy(self.pivot_tables[key])
+        info.setdefault("source_bounds", info.get("source_data"))
+        return info
+
+    def resolve_source_bounds(self, address: str) -> Any:
+        """This fake does not simulate Excel's R1C1 address normalization;
+        it treats the address string itself as the comparable identity."""
+        return address
+
+    def update_pivot_source(self, sheet: str, name: str, new_source_address: str) -> None:
+        self.calls.append(("update_pivot_source", f"{sheet}!{name}"))
+        key = f"{sheet}!{name}"
+        if key not in self.pivot_tables:
+            raise KeyError(f"PivotTable not found: {key}")
+        self.pivot_tables[key]["source_data"] = new_source_address
+        self.pivot_tables[key]["source_bounds"] = new_source_address
+        self.pivot_tables[key]["refreshed"] = True
 
     def close(self, *, save: bool = False) -> None:
         self.calls.append(("close", "save" if save else "discard"))

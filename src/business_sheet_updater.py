@@ -22,7 +22,12 @@ def get_last_used_row(worksheet: object) -> int:
 
 def insert_two_columns(worksheet: object, insert_at_col: int) -> None:
     try:
-        columns = worksheet.Columns(int(insert_at_col)).Resize(ColumnSize=2)
+        # pywin32's late-bound dynamic dispatch does not accept named keyword
+        # arguments such as Resize(ColumnSize=2); span the exact two-column
+        # entire-column range via Range(col1, col2) instead.
+        first_column = worksheet.Columns(int(insert_at_col))
+        second_column = worksheet.Columns(int(insert_at_col) + 1)
+        columns = worksheet.Range(first_column, second_column)
         columns.Insert(Shift=XL_TO_RIGHT, CopyOrigin=XL_FORMAT_FROM_LEFT_OR_ABOVE)
     except Exception as exc:  # pragma: no cover - requires Excel
         raise FormulaCloneError(

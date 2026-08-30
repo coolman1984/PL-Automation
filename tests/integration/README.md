@@ -30,3 +30,21 @@ set PL_COM_EXECUTE=1
 The real production run remains the exclusive job of `app.py --execute` /
 `RUN_A08.bat`; these tests exist to prove behavior on disposable copies derived
 through the approved SaveCopyAs transaction.
+
+## Deterministic read-only acceptance harness (V2 Task 3)
+
+`tools\run_read_range_acceptance.ps1` runs only `test_read_range.py` and
+records the acceptance evidence required by the V2 plan: source SHA-256
+before/after, exact parameters, pytest exit code and log, and Excel PIDs
+before/after. A JSON report is retained under `work\acceptance\`. A handled
+COM shutdown diagnostic (`0x80010108`) in the output is recorded but is not
+treated as a crash when pytest exits zero.
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\run_read_range_acceptance.ps1 `
+  -Workbook "D:\full\path\to\★Final PL Statement S08 T09 V4(1).xlsb" `
+  -Sheet "VD Total" -Address "A1:C10"
+```
+
+The harness fails (exit 1) when pytest fails, the source hash changes, or a
+new isolated Excel process remains.
