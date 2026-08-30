@@ -24,8 +24,8 @@ production generic write tools are still locked
 
 ## In progress
 
-- [ ] Excel COM adapter implementing the engine contract.
-- [ ] First universal read-only range tool behind a real engine.
+- [x] Excel COM adapter implementing the engine contract (unit-tested with COM doubles).
+- [ ] First universal read-only range tool accepted against real Windows Excel.
 
 ## Planned and locked
 
